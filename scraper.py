@@ -57,7 +57,6 @@ class ERPScraper:
         candidates = []
         
         # Common patterns for finding candidate rows
-        # These selectors need to be adjusted based on actual ERP HTML structure
         row_selectors = [
             'tr.candidate-row',
             'div.candidate-item',
@@ -121,9 +120,9 @@ class ERPScraper:
             if link:
                 href = link['href']
                 # Extract ID from URL patterns like /candidate/12345 or ?id=12345
-                id_match = re.search(r'/candidate/(\d+)|[?&]id=(\d+)', href)
+                id_match = re.search(r'/dispView/(\d+)', href)
                 if id_match:
-                    candidate_id = id_match.group(1) or id_match.group(2)
+                    candidate_id = id_match.group(1)
                     
         # Method 3: From text content
         if not candidate_id:
@@ -407,175 +406,6 @@ class ERPScraper:
         except Exception as e:
             logger.error(f"Error finding resume URL: {e}")
             
-        return None
-        
-    def extract_text_by_patterns(self, soup: BeautifulSoup, 
-                                patterns: List[tuple]) -> Optional[str]:
-        """
-        Extract text using multiple tag/attribute patterns
-        
-        Args:
-            soup: BeautifulSoup object
-            patterns: List of (tag, attrs) tuples
-            
-        Returns:
-            Extracted text or None
-        """
-        for tag, attrs in patterns:
-            element = soup.find(tag, attrs)
-            if element:
-                return element.get_text(strip=True)
-        return None
-        
-    def extract_text_by_label(self, soup: BeautifulSoup, 
-                             labels: List[str]) -> Optional[str]:
-        """
-        Extract text by looking for label patterns
-        
-        Args:
-            soup: BeautifulSoup object
-            labels: List of possible label texts
-            
-        Returns:
-            Extracted text or None
-        """
-        for label in labels:
-            # Method 1: Label in th, value in td
-            th = soup.find('th', string=re.compile(label, re.I))
-            if th:
-                td = th.find_next_sibling('td')
-                if td:
-                    return td.get_text(strip=True)
-                    
-            # Method 2: Label in dt, value in dd
-            dt = soup.find('dt', string=re.compile(label, re.I))
-            if dt:
-                dd = dt.find_next_sibling('dd')
-                if dd:
-                    return dd.get_text(strip=True)
-                    
-            # Method 3: Label in span/div, value in next element
-            label_elem = soup.find(text=re.compile(f'{label}:', re.I))
-            if label_elem:
-                parent = label_elem.parent
-                if parent:
-                    text = parent.get_text(strip=True)
-                    # Extract value after colon
-                    parts = text.split(':', 1)
-                    if len(parts) > 1:
-                        return parts[1].strip()
-                        
-        return None
-        
-    def extract_date_by_label(self, soup: BeautifulSoup, 
-                             labels: List[str]) -> Optional[str]:
-        """
-        Extract date by looking for label patterns
-        
-        Args:
-            soup: BeautifulSoup object
-            labels: List of possible label texts
-            
-        Returns:
-            Date string in YYYY-MM-DD format or None
-        """
-        text = self.extract_text_by_label(soup, labels)
-        if text:
-            # Try to parse various date formats
-            date_patterns = [
-                r'(\d{4}-\d{2}-\d{2})',  # YYYY-MM-DD
-                r'(\d{2}/\d{2}/\d{4})',  # MM/DD/YYYY
-                r'(\d{2}\.\d{2}\.\d{4})', # DD.MM.YYYY
-            ]
-            
-            for pattern in date_patterns:
-                match = re.search(pattern, text)
-                if match:
-                    date_str = match.group(1)
-                    # Convert to YYYY-MM-DD if needed
-                    if '/' in date_str:
-                        parts = date_str.split('/')
-                        date_str = f"{parts[2]}-{parts[0]}-{parts[1]}"
-                    elif '.' in date_str:
-                        parts = date_str.split('.')
-                        date_str = f"{parts[2]}-{parts[1]}-{parts[0]}"
-                    return date_str
-                    
-        return None
-        
-    def find_resume_url(self, soup: BeautifulSoup) -> Optional[str]:
-        """
-        Find resume download URL in the page
-        
-        Args:
-            soup: BeautifulSoup object
-            
-        Returns:
-            Resume URL or None
-        """
-        # Common patterns for resume links
-        patterns = [
-            ('a', {'href': re.compile(r'resume|cv|download.*pdf', re.I)}),
-            ('a', {'class': re.compile(r'resume|download', re.I)}),
-            ('a', string=re.compile(r'resume|cv|download', re.I)),
-            ('button', {'onclick': re.compile(r'download.*resume', re.I)}),
-        ]
-        
-        for tag, attrs in patterns:
-            element = soup.find(tag, attrs)
-            if element:
-                if tag == 'a' and element.get('href'):
-                    return element['href']
-                elif tag == 'button' and element.get('onclick'):
-                    # Extract URL from onclick
-                    onclick = element['onclick']
-                    url_match = re.search(r"['\"]([^'\"]*resume[^'\"]*)['\"]", onclick)
-                    if url_match:
-                        return url_match.group(1)
-                        
-        # Look for PDF links
-        pdf_links = soup.find_all('a', href=re.compile(r'\.pdf($|\?)', re.I))
-        if pdf_links:
-            return pdf_links[0]['href']
-            
-        return None
-        
-    def extract_email(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract email address from page"""
-        # Look for email pattern
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        
-        # Search in text
-        text = soup.get_text()
-        match = re.search(email_pattern, text)
-        if match:
-            return match.group(0)
-            
-        # Search in mailto links
-        mailto = soup.find('a', href=re.compile(r'^mailto:'))
-        if mailto:
-            return mailto['href'].replace('mailto:', '')
-            
-        return None
-        
-    def extract_phone(self, soup: BeautifulSoup) -> Optional[str]:
-        """Extract phone number from page"""
-        # Phone patterns (adjust based on region)
-        phone_patterns = [
-            r'\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}',
-            r'\d{3}-\d{3,4}-\d{4}',  # Korean format
-            r'\(\d{3}\)\s*\d{3}-\d{4}',  # US format
-        ]
-        
-        text = soup.get_text()
-        for pattern in phone_patterns:
-            match = re.search(pattern, text)
-            if match:
-                phone = match.group(0).strip()
-                # Basic validation
-                if len(re.sub(r'\D', '', phone)) >= 7:
-                    return phone
-                    
         return None
         
     def extract_pagination_info(self, html: str) -> Dict[str, Any]:

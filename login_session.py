@@ -12,6 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
 
 logger = logging.getLogger(__name__)
 
@@ -100,22 +101,65 @@ class ERPSession:
         try:
             self.session = self.create_requests_session()
             
-            # First, get the login page to obtain any CSRF tokens
-            login_page_url = f"{self.base_url}/login"
+            # HRcap ERP specific login URL
+            login_page_url = f"{self.base_url}/mem/dispLogin"
+            
+            logger.info(f"Accessing HRcap ERP login page: {login_page_url}")
+            
+            # Get the login page
             response = self.session.get(login_page_url)
             
-            # Extract CSRF token if needed (adjust based on actual ERP system)
-            # csrf_token = self.extract_csrf_token(response.text)
+            if response.status_code != 200:
+                logger.error(f"Failed to access login page. Status code: {response.status_code}")
+                return False
+                
+            logger.info(f"Successfully accessed login page")
             
-            # Prepare login data
+            # Extract CSRF token if needed (adjust based on actual ERP system)
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Look for any hidden form fields (CSRF tokens, etc.)
+            hidden_fields = {}
+            for hidden_input in soup.find_all('input', type='hidden'):
+                name = hidden_input.get('name')
+                value = hidden_input.get('value', '')
+                if name:
+                    hidden_fields[name] = value
+                    logger.debug(f"Found hidden field: {name} = {value}")
+                    
+            # Also check for any other form inputs that might be required
+            all_inputs = soup.find_all('input')
+            logger.debug(f"All form inputs found: {[inp.get('name', 'unnamed') + '(' + inp.get('type', 'text') + ')' for inp in all_inputs]}")
+                    
+            # Prepare login data for HRcap ERP (ID/PW fields)
             login_data = {
-                'username': self.username,
-                'password': self.password,
-                # 'csrf_token': csrf_token,  # Add if needed
+                'ID': self.username,  # HRcap uses 'ID' field
+                'PW': self.password,  # HRcap uses 'PW' field
+                **hidden_fields  # Include any hidden fields
             }
             
+            # Find the actual login form action
+            login_form = soup.find('form')
+            if login_form:
+                action = login_form.get('action')
+                if action:
+                    if action.startswith('/'):
+                        login_url = f"{self.base_url}{action}"
+                    elif action.startswith('http'):
+                        login_url = action
+                    else:
+                        login_url = f"{self.base_url}/mem/{action}"
+                else:
+                    # Default to login processing URL for HRcap
+                    login_url = f"{self.base_url}/mem/procLogin"
+            else:
+                login_url = f"{self.base_url}/mem/procLogin"
+                
+            logger.info(f"Attempting login to: {login_url}")
+            logger.debug(f"Login data fields: {list(login_data.keys())}")
+            
             # Submit login form
-            login_url = f"{self.base_url}/login"  # Adjust based on actual endpoint
             response = self.session.post(
                 login_url,
                 data=login_data,
@@ -124,15 +168,61 @@ class ERPSession:
             
             # Check if login was successful
             if response.status_code == 200:
-                # Look for indicators of successful login
-                # This needs to be customized based on the actual ERP system
-                if 'dashboard' in response.url or 'welcome' in response.text.lower():
+                # Look for indicators of successful login in HRcap ERP
+                response_text = response.text.lower()
+                response_url = response.url.lower()
+                
+                success_indicators = [
+                    'candidate', 'search', 'dashboard', 'welcome', 'logout',
+                    'dispSearchList', 'searchcandidate',  # HRcap specific
+                    'main', 'menu', 'home'  # General success indicators
+                ]
+                
+                # Check for login failure indicators
+                failure_indicators = [
+                    'login', 'error', '로그인', '실패', 'fail', 'invalid'
+                ]
+                
+                has_success = any(indicator in response_text or indicator in response_url 
+                                for indicator in success_indicators)
+                has_failure = any(indicator in response_text for indicator in failure_indicators)
+                
+                # If we're redirected away from login page and have success indicators
+                if has_success and not has_failure and '/mem/dispLogin' not in response_url:
                     logger.info("Successfully logged in with requests")
+                    logger.info(f"Redirected to: {response.url}")
                     self.logged_in = True
                     self.last_activity = time.time()
                     return True
                     
             logger.error(f"Login failed. Status code: {response.status_code}")
+            logger.error(f"Response URL: {response.url}")
+            
+            # Enhanced debugging for login failure
+            response_text_lower = response.text.lower()
+            
+            # Check for specific error messages
+            error_messages = [
+                '잘못된', 'invalid', 'incorrect', 'error', '실패', 'fail',
+                '아이디', 'username', 'password', '비밀번호', '로그인'
+            ]
+            
+            found_errors = [msg for msg in error_messages if msg in response_text_lower]
+            if found_errors:
+                logger.error(f"Detected error keywords: {found_errors}")
+            
+            # Log response content for debugging (more detailed)
+            if len(response.text) > 0:
+                logger.debug(f"Response content preview: {response.text[:1000]}...")
+                
+                # Look for form fields in response (might indicate login page returned)
+                if 'input' in response_text_lower and ('id' in response_text_lower or 'pw' in response_text_lower):
+                    logger.warning("Response still contains login form - login likely failed")
+                    
+            # Check if we're still on login-related page
+            if '/mem/' in response.url and ('login' in response.url.lower() or 'dispLogin' in response.url):
+                logger.error("Still on login page - credentials might be incorrect")
+            
             return False
             
         except Exception as e:
@@ -144,43 +234,119 @@ class ERPSession:
         try:
             self.driver = self.create_selenium_driver()
             
-            # Navigate to login page
-            login_url = f"{self.base_url}/login"
+            # Navigate to HRcap ERP login page
+            login_url = f"{self.base_url}/mem/dispLogin"
+            logger.info(f"Navigating to HRcap login page: {login_url}")
             self.driver.get(login_url)
             
             # Wait for login form to load
             wait = WebDriverWait(self.driver, 10)
             
-            # Find and fill username field
-            username_field = wait.until(
-                EC.presence_of_element_located((By.NAME, "username"))
-            )
+            # Find and fill ID field (HRcap uses 'ID' field)
+            try:
+                username_field = wait.until(
+                    EC.presence_of_element_located((By.NAME, "ID"))
+                )
+                logger.info("Found ID field")
+            except TimeoutException:
+                # Fallback to other possible field names
+                try:
+                    username_field = self.driver.find_element(By.NAME, "username")
+                    logger.info("Found username field")
+                except NoSuchElementException:
+                    username_field = self.driver.find_element(By.NAME, "loginid")
+                    logger.info("Found loginid field")
+            
             username_field.clear()
             username_field.send_keys(self.username)
+            logger.info(f"Entered username: {self.username}")
             
-            # Find and fill password field
-            password_field = self.driver.find_element(By.NAME, "password")
+            # Find and fill PW field (HRcap uses 'PW' field)
+            try:
+                password_field = self.driver.find_element(By.NAME, "PW")
+                logger.info("Found PW field")
+            except NoSuchElementException:
+                password_field = self.driver.find_element(By.NAME, "password")
+                logger.info("Found password field")
+            
             password_field.clear()
             password_field.send_keys(self.password)
+            logger.info("Entered password")
             
-            # Submit form
-            submit_button = self.driver.find_element(
-                By.CSS_SELECTOR, 
-                "button[type='submit'], input[type='submit']"
-            )
-            submit_button.click()
+            # Wait a moment for any JavaScript to load
+            time.sleep(1)
             
-            # Wait for redirect after login
+            # Submit form - look for LOGIN button or submit
+            try:
+                submit_button = self.driver.find_element(By.XPATH, "//input[@value='LOGIN']")
+                logger.info("Found LOGIN input button")
+            except NoSuchElementException:
+                try:
+                    submit_button = self.driver.find_element(
+                        By.CSS_SELECTOR, 
+                        "button[type='submit'], input[type='submit']"
+                    )
+                    logger.info("Found submit button")
+                except NoSuchElementException:
+                    try:
+                        # Look for any button with LOGIN text
+                        submit_button = self.driver.find_element(By.XPATH, "//*[contains(text(), 'LOGIN') or contains(text(), '로그인')]")
+                        logger.info("Found button with LOGIN text")
+                    except NoSuchElementException:
+                        # Last resort - try clicking Enter on password field
+                        logger.warning("No submit button found, trying Enter key")
+                        password_field.send_keys(Keys.RETURN)
+                        submit_button = None
+            
+            if submit_button:
+                submit_button.click()
+                logger.info("Clicked login button")
+            
+            # Wait for AJAX response or redirect
+            logger.info("Waiting for login response...")
             time.sleep(3)
             
-            # Check if login was successful
-            if 'dashboard' in self.driver.current_url or 'welcome' in self.driver.title.lower():
-                logger.info("Successfully logged in with Selenium")
-                self.logged_in = True
-                self.last_activity = time.time()
-                return True
-                
-            logger.error("Login failed - no redirect to dashboard")
+            # Check current URL and page content
+            current_url = self.driver.current_url
+            page_source = self.driver.page_source
+            
+            logger.info(f"Current URL after login: {current_url}")
+            
+            # Check for error messages in page
+            if '{"message":"require id or password !!!","error":2}' in page_source:
+                logger.error("HRcap ERP returned: require id or password error")
+                return False
+            
+            # Look for other JSON error responses
+            import re
+            json_errors = re.findall(r'\{"message":"([^"]+)","error":\d+\}', page_source)
+            if json_errors:
+                logger.error(f"HRcap ERP JSON errors: {json_errors}")
+                return False
+            
+            # Check if login was successful for HRcap ERP
+            current_url_lower = current_url.lower()
+            page_source_lower = page_source.lower()
+            
+            success_indicators = [
+                'candidate', 'search', 'main', 'menu', 'logout',
+                'dispSearchList', 'searchcandidate',  # HRcap specific
+                'dashboard', 'home'
+            ]
+            
+            # If we're redirected away from login page and have success indicators
+            if '/mem/dispLogin' not in current_url_lower:
+                if any(indicator in page_source_lower or indicator in current_url_lower for indicator in success_indicators):
+                    logger.info("Successfully logged in with Selenium")
+                    logger.info(f"Redirected to: {current_url}")
+                    self.logged_in = True
+                    self.last_activity = time.time()
+                    return True
+                else:
+                    logger.warning("Redirected from login page but no success indicators found")
+                    logger.debug(f"Page content preview: {page_source[:500]}...")
+            
+            logger.error(f"Login failed - still on login page: {current_url}")
             return False
             
         except TimeoutException:

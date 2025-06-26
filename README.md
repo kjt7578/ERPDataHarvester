@@ -56,10 +56,6 @@ pip install -r requirements.txt
 ### 2. 환경변수 설정
 
 ```bash
-# env.example을 .env로 복사
-copy env.example .env  # Windows
-# cp env.example .env  # Linux/Mac
-
 # .env 파일을 편집하여 ERP 접속 정보 입력
 ```
 
@@ -76,7 +72,8 @@ python main.py --selenium
 python main.py --page 5
 
 # 특정 후보자만 처리
-python main.py --id 1042714
+# URL 번호로 접근하지만, 실제 candidate_id로 저장
+python main.py --id 65586
 
 # 디버그 모드
 python main.py --log-level DEBUG
@@ -154,12 +151,32 @@ if candidate_info.status == 'Active':
 - [ ] 중복 검사 강화
 - [ ] 다국어 지원
 
-## ⚠️ 주의사항
+## ⚠️ 중요 주의사항
 
-1. ERP 시스템의 HTML 구조가 변경되면 `scraper.py`의 파싱 로직 수정 필요
-2. 대량 다운로드 시 ERP 서버 부하를 고려하여 적절한 딜레이 설정
-3. 로그인 세션 타임아웃 시 자동 재로그인 처리
-4. PDF 파일 검증을 통해 손상된 파일 재다운로드
+### 외부 호스팅 ERP 시스템 사용시
+**이 도구를 외부 업체가 호스팅하는 ERP 시스템에 사용하기 전에 반드시:**
+
+1. **사전 승인 필수**
+   - IT 관리자/담당자 승인
+   - ERP 호스팅 업체 정책 확인
+   - 서비스 약관 검토
+
+2. **법적 검토**
+   - 자동화 접근 허용 여부 확인
+   - 데이터 수집 권한 검토
+   - 개인정보보호 정책 준수
+
+3. **기술적 고려사항**
+   - 운영 환경이 아닌 테스트 환경 사용 권장
+   - 공식 API 연동 방식 우선 검토
+   - 트래픽 제한 및 속도 조절 필수
+
+### 권장 대안
+- **공식 API 사용**: HRcap에서 제공하는 정식 API 활용
+- **내부 시스템**: 자체 호스팅 ERP 시스템에서만 사용
+- **테스트 환경**: 운영 데이터가 아닌 샘플 데이터로 테스트
+
+**⚠️ 무단 사용으로 인한 모든 법적 책임은 사용자에게 있습니다.**
 
 ## 🤝 기여하기
 

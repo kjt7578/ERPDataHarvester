@@ -93,7 +93,8 @@ class ERPResumeHarvester:
                 base_url=config.erp_base_url,
                 username=config.erp_username,
                 password=config.erp_password,
-                use_selenium=self.use_selenium
+                use_selenium=True,
+                headless=False
             )
             
             # Login

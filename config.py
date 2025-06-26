@@ -15,7 +15,7 @@ class Config:
     
     def __init__(self):
         # ERP System Configuration
-        self.erp_base_url = os.getenv('ERP_BASE_URL', 'https://your-erp-system.com')
+        self.erp_base_url = os.getenv('ERP_BASE_URL', 'http://erp.hrcap.com')
         self.erp_username = os.getenv('ERP_USERNAME', '')
         self.erp_password = os.getenv('ERP_PASSWORD', '')
         
@@ -37,13 +37,13 @@ class Config:
         
         # Pagination
         self.items_per_page = int(os.getenv('ITEMS_PER_PAGE', '20'))
-        self.max_pages = int(os.getenv('MAX_PAGES', '0'))  # 0 means no limit
+        self.max_pages = int(os.getenv('MAX_PAGES', '2'))  # 테스트용으로 2페이지로 제한
         
         # File naming
         self.file_name_pattern = os.getenv('FILE_NAME_PATTERN', '{name}_{id}_resume')
         
         # Logging
-        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
+        self.log_level = os.getenv('LOG_LEVEL', 'DEBUG')
         self.log_format = os.getenv(
             'LOG_FORMAT', 
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
