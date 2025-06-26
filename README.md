@@ -75,6 +75,12 @@ python main.py --page 5
 # URL 번호로 접근하지만, 실제 candidate_id로 저장
 python main.py --id 65586
 
+# 범위로 다운로드
+python main.py --range "65585-65580"
+
+# 개별 ID로 다운로드
+python main.py --range "65580,65581,65582,65583,65584,65585"
+
 # 디버그 모드
 python main.py --log-level DEBUG
 ```

@@ -25,6 +25,7 @@ class CandidateInfo:
     status: Optional[str] = None
     position: Optional[str] = None
     detail_url: Optional[str] = None
+    url_id: Optional[str] = None  # URL ID for reference (e.g., 65586)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -246,7 +247,8 @@ class ERPScraper:
         """
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Initialize with defaults
+        # Initialize with defaults (use URL ID as fallback)
+        url_id = candidate_id  # Keep URL ID as backup
         info = {
             'candidate_id': candidate_id,
             'name': 'Unknown',
@@ -254,19 +256,84 @@ class ERPScraper:
             'updated_date': datetime.now().strftime('%Y-%m-%d'),
         }
         
-        # Extract candidate ID from hidden input (more reliable)
-        cdd_input = soup.find('input', {'id': 'cdd'})
-        if cdd_input and cdd_input.get('value'):
-            info['candidate_id'] = cdd_input['value']
-            
+        # Extract REAL candidate ID from HTML (multiple methods)
+        real_candidate_id = None
+        
+        # Method 1: From table with "Candidate ID" header
+        try:
+            # Find th containing "Candidate ID"
+            th_elements = soup.find_all('th')
+            for th in th_elements:
+                if 'Candidate ID' in th.get_text(strip=True):
+                    # Find the corresponding td
+                    td = th.find_next_sibling('td')
+                    if td:
+                        real_candidate_id = td.get_text(strip=True)
+                        logger.info(f"Found real Candidate ID: {real_candidate_id} (URL ID: {url_id})")
+                        break
+        except Exception as e:
+            logger.debug(f"Method 1 failed: {e}")
+        
+        # Method 2: From hidden input with id='cdd'
+        if not real_candidate_id:
+            try:
+                cdd_input = soup.find('input', {'id': 'cdd'})
+                if cdd_input and cdd_input.get('value'):
+                    real_candidate_id = cdd_input['value']
+                    logger.info(f"Found Candidate ID from input: {real_candidate_id}")
+            except Exception as e:
+                logger.debug(f"Method 2 failed: {e}")
+        
+        # Method 3: Search for pattern in all table cells
+        if not real_candidate_id:
+            try:
+                td_elements = soup.find_all('td')
+                for td in td_elements:
+                    text = td.get_text(strip=True)
+                    # Look for numeric ID that's different from URL ID
+                    if text.isdigit() and len(text) >= 6 and text != url_id:
+                        # Check if previous th contains "ID" or similar
+                        prev_th = td.find_previous_sibling('th')
+                        if prev_th and 'id' in prev_th.get_text(strip=True).lower():
+                            real_candidate_id = text
+                            logger.info(f"Found Candidate ID from pattern: {real_candidate_id}")
+                            break
+            except Exception as e:
+                logger.debug(f"Method 3 failed: {e}")
+        
+        # Use real candidate ID if found
+        if real_candidate_id:
+            info['candidate_id'] = real_candidate_id
+            # Store URL ID as additional field for reference
+            info['url_id'] = url_id
+        else:
+            logger.warning(f"Could not find real Candidate ID, using URL ID: {url_id}")
+            info['candidate_id'] = url_id
+        
         # Extract name from h2 tag
         h2_title = soup.find('h2')
         if h2_title:
             h2_text = h2_title.get_text(strip=True)
-            # Extract name from "Candidate Information - Sang Youn HAN"
+            # Extract name from "Candidate Information - Meghan Lee"
             if ' - ' in h2_text:
                 name = h2_text.split(' - ', 1)[1].strip()
                 info['name'] = name
+            else:
+                # Fallback: just use the text after "Candidate Information"
+                name_part = h2_text.replace('Candidate Information', '').strip()
+                if name_part:
+                    info['name'] = name_part.lstrip(' -').strip()
+                    
+        # Also try to extract name from document title (backup method)
+        if info['name'] == 'Unknown':
+            title_tag = soup.find('title')
+            if title_tag:
+                title_text = title_tag.get_text(strip=True)
+                # Extract from "Meghan Lee : HRCap"
+                if ' : ' in title_text:
+                    name = title_text.split(' : ')[0].strip()
+                    if name and name != 'HRCap':
+                        info['name'] = name
         
         # Extract dates from Profile Status section
         created_date = self._extract_hrcap_date(soup, 'Created')
@@ -425,45 +492,56 @@ class ERPScraper:
             Resume URL or None
         """
         try:
-            # Method 1: Find downloadFile button with file key
-            download_buttons = soup.find_all('button', string=re.compile('Download.*RESUME', re.I))
+            # Method 1: Find downloadFile button with file key from onclick
+            # <button type="button" onclick="downloadFile('f26632f3-5419-b4d4-654c-13b51e32f228');">Download</button>
+            download_buttons = soup.find_all('button')
             for button in download_buttons:
                 onclick = button.get('onclick')
                 if onclick and 'downloadFile' in onclick:
-                    # Extract file key from downloadFile('8100a96c-91ac-90b2-9211-6c923cb7a156')
+                    # Extract file key from downloadFile('f26632f3-5419-b4d4-654c-13b51e32f228')
                     key_match = re.search(r"downloadFile\('([^']+)'\)", onclick)
                     if key_match:
                         file_key = key_match.group(1)
+                        logger.info(f"Found resume file key: {file_key}")
                         return f"/file/procDownload/{file_key}"
                         
-            # Method 2: Find direct file links in Resume section
-            resume_section = soup.find('h3', string=re.compile('Candidate Resume', re.I))
-            if resume_section:
-                # Find table after this header
-                table = resume_section.find_next('table')
-                if table:
-                    # Look for file links
-                    file_links = table.find_all('a', href=True)
-                    for link in file_links:
-                        href = link['href']
-                        # Check if it's a resume file link
-                        if '/html/files/' in href and any(ext in href.lower() for ext in ['.pdf', '.doc', '.docx']):
-                            return href
-                            
-            # Method 3: Look for any downloadFile buttons
-            all_download_buttons = soup.find_all('button', string=re.compile('Download', re.I))
-            for button in all_download_buttons:
-                onclick = button.get('onclick')
-                if onclick and 'downloadFile' in onclick:
+            # Method 2: Find direct PDF links in Resume section
+            # <a href="http://erp.hrcap.com/html/files/f/2/f26632f3-5419-b4d4-654c-13b51e32f228.pdf" target="_blank">Meghan-Lee.pdf</a>
+            pdf_links = soup.find_all('a', href=True)
+            for link in pdf_links:
+                href = link['href']
+                if '.pdf' in href.lower() and 'files' in href:
+                    # Extract file key from direct PDF URL
+                    # http://erp.hrcap.com/html/files/f/2/f26632f3-5419-b4d4-654c-13b51e32f228.pdf
+                    key_match = re.search(r'/files/[^/]+/[^/]+/([^/]+)\.pdf', href)
+                    if key_match:
+                        file_key = key_match.group(1)
+                        logger.info(f"Found resume file key from PDF link: {file_key}")
+                        return f"/file/procDownload/{file_key}"
+                    else:
+                        # Use direct PDF URL if no key found
+                        logger.info(f"Found direct PDF URL: {href}")
+                        return href
+                        
+            # Method 3: Search for any resume-related onclick with RESUME keyword
+            # <button type="button" onclick="downloadFile('f26632f3-5419-b4d4-654c-13b51e32f228');">Download RESUME</button>
+            all_elements = soup.find_all(attrs={'onclick': True})
+            for element in all_elements:
+                onclick = element.get('onclick')
+                button_text = element.get_text(strip=True).upper()
+                if onclick and 'downloadFile' in onclick and 'RESUME' in button_text:
                     key_match = re.search(r"downloadFile\('([^']+)'\)", onclick)
                     if key_match:
                         file_key = key_match.group(1)
+                        logger.info(f"Found resume file key from RESUME button: {file_key}")
                         return f"/file/procDownload/{file_key}"
                         
+            logger.warning("No resume URL found in any method")
+            return None
+            
         except Exception as e:
             logger.error(f"Error finding resume URL: {e}")
-            
-        return None
+            return None
         
     def extract_pagination_info(self, html: str) -> Dict[str, Any]:
         """

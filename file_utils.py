@@ -121,37 +121,59 @@ def extract_date_parts(date_string: str) -> Tuple[str, str]:
 
 
 def generate_filename_from_template(
-    template: str,
-    name: str,
+    template: str, 
+    name: str, 
     candidate_id: str,
-    extension: str = 'pdf'
+    url_id: str = None,
+    **kwargs
 ) -> str:
     """
-    Generate filename from template pattern
+    Generate filename from template with candidate information
     
     Args:
-        template: Template string with placeholders (e.g., '{name}_{id}_resume')
+        template: Filename template (e.g., '{name}_{id}_resume')
         name: Candidate name
-        candidate_id: Candidate ID
-        extension: File extension
+        candidate_id: Real candidate ID (e.g., 1044760)
+        url_id: URL ID (e.g., 65586) - optional
+        **kwargs: Additional template variables
         
     Returns:
-        Generated filename
+        Safe filename string
     """
-    # Sanitize name first
+    # Clean name for filename
     safe_name = sanitize_filename(name)
     
-    # Replace placeholders
-    filename = template.format(
-        name=safe_name,
-        id=candidate_id
-    )
+    # Prepare template variables
+    template_vars = {
+        'name': safe_name,
+        'id': candidate_id,  # Use real candidate ID
+        'candidate_id': candidate_id,
+        'url_id': url_id or candidate_id,  # Fallback to candidate_id if no url_id
+        **kwargs
+    }
     
-    # Add extension if not present
-    if not filename.endswith(f'.{extension}'):
-        filename = f"{filename}.{extension}"
+    try:
+        # Apply template
+        filename = template.format(**template_vars)
         
-    return filename
+        # Ensure it ends with .pdf
+        if not filename.lower().endswith('.pdf'):
+            filename += '.pdf'
+            
+        # Final sanitization
+        filename = sanitize_filename(filename)
+        
+        # If filename is too long, truncate
+        if len(filename) > 200:
+            name_part = safe_name[:50]
+            filename = f"{name_part}_{candidate_id}_resume.pdf"
+            
+        return filename
+        
+    except KeyError as e:
+        logger.warning(f"Template variable missing: {e}, using fallback")
+        # Fallback to simple format
+        return f"{safe_name}_{candidate_id}_resume.pdf"
 
 
 def ensure_file_permissions(file_path: Path):
