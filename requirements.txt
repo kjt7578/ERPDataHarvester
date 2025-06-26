@@ -1,0 +1,32 @@
+# Web scraping and HTTP requests
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+selenium>=4.15.0
+webdriver-manager>=4.0.1
+
+# Data processing
+pandas>=2.1.0
+
+# File handling
+python-magic>=0.4.27
+
+# Scheduling (for future automated runs)
+schedule>=1.2.0
+
+# Telegram bot (optional, for future integration)
+python-telegram-bot>=20.7
+
+# MySQL connector (optional, for future DB integration)
+mysql-connector-python>=8.2.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Logging
+colorlog>=6.8.0
+
+# Progress bar
+tqdm>=4.66.0
+
+# Type checking
+typing-extensions>=4.9.0 
