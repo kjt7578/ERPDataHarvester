@@ -4,13 +4,24 @@ ERP 웹 시스템에서 후보자 정보와 이력서 PDF를 자동으로 수집
 
 ## 🎯 주요 기능
 
+### 후보자 데이터 수집
 - ERP 시스템 자동 로그인 및 세션 유지
 - 후보자 리스트 페이지 순회 및 파싱
-- 후보자 상세 정보 추출 (ID, 이름, 이메일, 전화번호, 날짜 등)
+- 후보자 상세 정보 추출 (실제 ID, 이름, 이메일, 전화번호, 날짜 등)
 - 이력서 PDF 자동 다운로드 (재시도 로직 포함)
 - 체계적인 디렉토리 구조로 파일 저장
+
+### 케이스 데이터 수집
+- 케이스 리스트 페이지 순회 및 파싱  
+- 케이스 상세 정보 추출 (실제 Case No, 회사명, 직무명, 상태)
+- 연결된 후보자 실제 ID 자동 추출
+- 클라이언트 실제 ID 자동 추출
+- URL ID → 실제 ID 자동 변환
+
+### 공통 기능
 - 메타데이터 JSON/CSV 형식 저장
 - 다운로드 진행 상황 표시 및 통계 제공
+- 유연한 명령어 옵션 (단일/범위/전체 수집)
 
 ## 📁 프로젝트 구조
 
@@ -61,28 +72,58 @@ pip install -r requirements.txt
 
 ### 3. 실행
 
+#### 후보자 데이터 수집
+
 ```bash
 # 전체 후보자 수집
-python main.py
+python main.py --type candidate
 
 # Selenium 모드로 실행 (JavaScript 렌더링이 필요한 경우)
-python main.py --selenium
+python main.py --type candidate --selenium
 
 # 특정 페이지부터 시작
-python main.py --page 5
+python main.py --type candidate --page 5
 
 # 특정 후보자만 처리
 # URL 번호로 접근하지만, 실제 candidate_id로 저장
-python main.py --id 65586
+python main.py --type candidate --id 65586
 
 # 범위로 다운로드
-python main.py --range "65585-65580"
+python main.py --type candidate --range "65585-65580"
 
 # 개별 ID로 다운로드
-python main.py --range "65580,65581,65582,65583,65584,65585"
+python main.py --type candidate --range "65580,65581,65582,65583,65584,65585"
+```
 
+#### 케이스 데이터 수집
+
+```bash
+# 전체 케이스 수집
+python main.py --type case
+
+# 특정 케이스만 처리
+# URL 번호로 접근하지만, 실제 Case No로 저장
+python main.py --type case --id 3897
+
+# 케이스 범위로 다운로드
+python main.py --type case --range "3897-3900"
+
+# 개별 케이스 ID로 다운로드
+python main.py --type case --range "3897,3898,3899"
+
+# 특정 페이지부터 케이스 수집
+python main.py --type case --page 2
+```
+
+#### 공통 옵션
+
+```bash
 # 디버그 모드
-python main.py --log-level DEBUG
+python main.py --type candidate --log-level DEBUG
+python main.py --type case --log-level DEBUG
+
+# 기본값 (후보자 수집)
+python main.py  # --type candidate와 동일
 ```
 
 ## ⚙️ 환경변수 설정
@@ -117,18 +158,35 @@ FILE_NAME_PATTERN={name}_{id}_resume
 
 ## 📊 출력 파일
 
-### 1. 이력서 PDF
+### 후보자 데이터
+
+#### 1. 이력서 PDF
 - 위치: `resumes/{year}/{month}/{name}_{id}_resume.pdf`
 - 생성일 기준으로 연도/월 폴더에 자동 분류
 
-### 2. 개별 메타데이터
+#### 2. 개별 메타데이터
 - 위치: `metadata/{name}_{id}_resume.meta.json`
 - 후보자별 상세 정보 포함
 
-### 3. 통합 결과
+#### 3. 통합 결과
 - `results/candidates.json`: 모든 후보자 정보 (JSON)
 - `results/candidates.csv`: 모든 후보자 정보 (CSV)
 - `results/download_report_*.txt`: 다운로드 통계 보고서
+
+### 케이스 데이터
+
+#### 1. 개별 케이스 메타데이터
+- 위치: `metadata/{company}_{jobcase_id}_{job_title}.case.meta.json`
+- 케이스별 상세 정보 포함:
+  - 실제 Case No (URL ID에서 변환)
+  - 회사명, 직무명, 상태
+  - 등록일, 담당팀, 작성자
+  - 연결된 후보자 실제 ID 목록
+  - 실제 클라이언트 ID
+
+#### 2. 통합 케이스 결과
+- `results/cases.json`: 모든 케이스 정보 (JSON)
+- `results/cases.csv`: 모든 케이스 정보 (CSV)
 
 ## 🔧 고급 사용법
 

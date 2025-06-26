@@ -1,7 +1,7 @@
 # HR ERP 자동 이력서 수집 시스템 - 작업 관리
 
 ## 🎯 프로젝트 개요
-ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하고 체계적으로 저장하는 시스템
+ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수집하고 체계적으로 저장하는 시스템
 
 ## 📌 주요 작업 (Major Tasks)
 
@@ -11,12 +11,13 @@ ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하�
 - [x] 기본 프로젝트 구조 생성 (디렉토리, requirements.txt, .gitignore)
 - [x] config.py - 설정 관리 모듈 구현
 - [x] login_session.py - 로그인 세션 관리 구현
-- [x] scraper.py - HTML 파싱 및 데이터 추출 구현
+- [x] scraper.py - HTML 파싱 및 데이터 추출 구현 (후보자 + 케이스)
 - [x] downloader.py - PDF 다운로드 모듈 구현
 - [x] file_utils.py - 파일 및 디렉토리 관리 구현
-- [x] metadata_saver.py - 메타데이터 저장 구현
-- [x] main.py - 메인 실행 로직 구현
-- [x] README.md - 프로젝트 문서화
+- [x] metadata_saver.py - 메타데이터 저장 구현 (후보자 + 케이스)
+- [x] main.py - 메인 실행 로직 구현 (듀얼 모드)
+- [x] README.md - 프로젝트 문서화 (케이스 기능 포함)
+- [x] JobCase 기능 완전 구현 (실제 ID 추출 포함)
 
 ### 🔄 진행 중인 작업
 (현재 없음)
@@ -32,6 +33,28 @@ ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하�
 - [ ] 대용량 처리를 위한 비동기 처리 구현
 
 ## 📝 주요 업데이트 (Major Updates)
+
+### 2025-06-26: JobCase 기능 완전 구현 및 실제 ID 추출 완료 ✅
+**주요 성과:**
+- **실제 ID 추출 완성**: URL ID → 실제 ID 변환 시스템 완전 구현
+  - Case ID: URL 3897 → 실제 "Case No 13897"  
+  - Candidate IDs: URL 64853,64879 → 실제 "1044027,1044053"
+  - Client ID: URL 245 → 실제 "1243"
+- **다중 페이지 탐색으로 연결 데이터 추출**: 4가지 패턴으로 클라이언트 ID 추출 보장
+- **README.md 완전 개편**: 후보자/케이스 구분, 명령어 예시 추가
+- **환경변수 처리 개선**: 주석 제거 및 에러 방지 로직 추가
+
+**구현된 케이스 기능:**
+- Case 정보: 회사명, 직무명, 상태, 등록일, 담당팀, 작성자
+- 연결 데이터: 실제 후보자 ID 목록, 실제 클라이언트 ID  
+- 파일 출력: 개별 JSON + 통합 JSON/CSV
+- CLI 명령어: `--type case` 옵션으로 케이스 모드 지원
+
+**기술적 특징:**
+- 세션 기반 다중 페이지 탐색으로 실제 ID 추출
+- URL ID 대신 실제 ID 사용으로 데이터 정확성 보장
+- 실패시 fallback 메커니즘으로 안정성 확보
+
 - 2025-01-02: 프로젝트 초기 설계 완료
 - 2025-01-02: 전체 핵심 모듈 구현 완료
   - config.py: 환경변수 기반 설정 관리
@@ -103,7 +126,7 @@ ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하�
 
 ## 📋 기술 스택
 - Python 3.12
-- requests / selenium
+- requests / selenium  
 - BeautifulSoup4
 - pandas (CSV 처리)
 - tqdm (진행률 표시)
@@ -112,14 +135,22 @@ ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하�
 - MySQL connector (예정)
 
 ## 🔍 구현 특징
-1. **모듈화된 구조**: 각 기능별로 독립된 모듈로 분리
-2. **유연한 스크래핑**: 다양한 HTML 구조에 대응 가능
-3. **안정적인 다운로드**: 재시도 로직과 검증 기능
-4. **체계적인 저장**: 연도/월 기반 디렉토리 구조
-5. **상세한 로깅**: 디버깅과 모니터링 용이
-6. **CLI 지원**: 다양한 실행 옵션 제공 
+1. **이중 모드 지원**: 후보자 수집(`--type candidate`) + 케이스 수집(`--type case`)
+2. **실제 ID 추출**: URL ID가 아닌 실제 시스템 ID 사용
+3. **모듈화된 구조**: 각 기능별로 독립된 모듈로 분리
+4. **유연한 스크래핑**: 다양한 HTML 구조에 대응 가능
+5. **안정적인 다운로드**: 재시도 로직과 검증 기능
+6. **체계적인 저장**: 연도/월 기반 디렉토리 구조
+7. **상세한 로깅**: 디버깅과 모니터링 용이
+8. **CLI 지원**: 다양한 실행 옵션 제공
 
 ## 완료된 작업 (Completed Tasks)
+
+✅ **JobCase 실제 ID 추출 시스템 완성** - 2025-06-26
+- URL ID → 실제 ID 변환: Case 3897 → Case No 13897
+- 다중 페이지 탐색으로 연결 데이터 추출
+- 4가지 패턴으로 클라이언트 ID 추출 보장
+- 환경변수 주석 처리 로직 추가
 
 ✅ **ID 범위 다운로드 기능 추가** - 2025-06-26
 - 페이지 스크래핑 대신 ID 범위로 안정적 다운로드
@@ -147,29 +178,57 @@ ERP 웹 시스템에서 후보자 정보와 이력서를 자동으로 수집하�
 - 로깅 시스템 구축
 - 에러 처리 강화
 
+## 사용법 (Usage)
+
+### 후보자 수집
+```bash
+# 전체 후보자 수집
+python main.py --type candidate
+
+# 특정 후보자 (URL ID로 접근, 실제 ID로 저장)
+python main.py --type candidate --id 65586
+
+# 범위로 다운로드  
+python main.py --type candidate --range "65585-65580"
+```
+
+### 케이스 수집  
+```bash
+# 전체 케이스 수집
+python main.py --type case
+
+# 특정 케이스 (URL ID로 접근, 실제 Case No로 저장)
+python main.py --type case --id 3897
+
+# 케이스 범위로 다운로드
+python main.py --type case --range "3897-3900"
+```
+
 ## 다음 실행 단계
 
 1. **환경변수 설정**:
-   ```
-   $env:ERP_USERNAME="your_username"
-   $env:ERP_PASSWORD="your_password"
-   ```
-
-2. **단일 후보자 테스트**:
-   ```
-   python main.py --id 65586
+   ```bash
+   # .env 파일에서 설정
+   ERP_USERNAME=your_username  
+   ERP_PASSWORD=your_password
+   REQUEST_DELAY=2.0
    ```
 
-3. **ID 범위 다운로드** (추천!):
+2. **단일 케이스 테스트** (추천!):
+   ```bash
+   python main.py --type case --id 3897
    ```
-   # 범위 형식 (65585부터 65580까지 역순)
-   python main.py --range "65585-65580"
+
+3. **단일 후보자 테스트**:
+   ```bash
+   python main.py --type candidate --id 65586
+   ```
+
+4. **범위 다운로드**:
+   ```bash
+   # 케이스 범위
+   python main.py --type case --range "3897-3900"
    
-   # 개별 ID 형식
-   python main.py --range "65580,65581,65582,65583,65584,65585"
-   ```
-
-4. **페이지 수집** (불안정):
-   ```
-   python main.py --page 1
+   # 후보자 범위
+   python main.py --type candidate --range "65585-65580"
    ``` 

@@ -35,6 +35,8 @@ class MetadataSaver:
         # Paths for consolidated files
         self.candidates_json_path = self.results_dir / 'candidates.json'
         self.candidates_csv_path = self.results_dir / 'candidates.csv'
+        self.cases_json_path = self.results_dir / 'cases.json'
+        self.cases_csv_path = self.results_dir / 'cases.csv'
         
     def save_candidate_metadata(self, candidate_info: Dict[str, Any], 
                                pdf_path: Optional[Path] = None) -> bool:
@@ -91,39 +93,191 @@ class MetadataSaver:
             logger.error(f"Error saving metadata for candidate {candidate_id}: {e}")
             return False
             
-    def save_consolidated_results(self, all_candidates: List[Dict[str, Any]]) -> bool:
+    def save_case_metadata(self, case_info: Dict[str, Any]) -> bool:
         """
-        Save all candidate data to consolidated JSON and CSV files
+        Save individual case metadata to JSON file
         
         Args:
-            all_candidates: List of all candidate information
+            case_info: Case information dictionary
             
         Returns:
             True if successful
         """
         try:
-            # Add summary statistics
-            summary = {
-                'total_candidates': len(all_candidates),
-                'last_updated': datetime.now().isoformat(),
-                'candidates': all_candidates
+            # Generate metadata filename
+            case_id = case_info.get('jobcase_id', 'unknown')
+            job_title = case_info.get('job_title', 'unknown')
+            company_name = case_info.get('company_name', 'unknown')
+            
+            # Use case naming pattern
+            filename = f"{self._sanitize_name(company_name)}_{case_id}_{self._sanitize_name(job_title)}"
+            metadata_filename = f"{filename}.case.meta.json"
+            metadata_path = self.metadata_dir / metadata_filename
+            
+            # Prepare metadata
+            metadata = {
+                'jobcase_id': case_id,
+                'job_title': job_title,
+                'company_name': company_name,
+                'created_date': case_info.get('created_date'),
+                'updated_date': case_info.get('updated_date'),
+                'job_status': case_info.get('job_status'),
+                'assigned_team': case_info.get('assigned_team'),
+                'drafter': case_info.get('drafter'),
+                'client_id': case_info.get('client_id'),
+                'candidate_ids': case_info.get('candidate_ids', []),
+                'detail_url': case_info.get('detail_url'),
+                'location': case_info.get('location'),
+                'salary_range': case_info.get('salary_range'),
+                'employment_type': case_info.get('employment_type'),
+                'total_connected_candidates': len(case_info.get('candidate_ids', [])),
+                'metadata_created': datetime.now().isoformat(),
+                'scrape_timestamp': datetime.now().isoformat()
             }
             
-            # Save to JSON
-            with open(self.candidates_json_path, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
+            # Save to JSON file
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
                 
-            logger.info(f"Saved {len(all_candidates)} candidates to {self.candidates_json_path}")
+            logger.debug(f"Saved case metadata for {job_title} ({case_id})")
+            return True
             
-            # Save to CSV
-            if all_candidates:
-                self._save_to_csv(all_candidates)
+        except Exception as e:
+            logger.error(f"Error saving case metadata for {case_id}: {e}")
+            return False
+            
+    def save_consolidated_results(self, all_data: List[Dict[str, Any]], 
+                                data_type: str = 'candidate') -> bool:
+        """
+        Save all data to consolidated JSON and CSV files
+        
+        Args:
+            all_data: List of all information (candidate or case)
+            data_type: Type of data being saved ('candidate' or 'case')
+            
+        Returns:
+            True if successful
+        """
+        try:
+            if data_type == 'case':
+                # Handle case data
+                summary = {
+                    'total_cases': len(all_data),
+                    'last_updated': datetime.now().isoformat(),
+                    'cases': all_data
+                }
+                
+                # Save to JSON
+                with open(self.cases_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+                    
+                logger.info(f"Saved {len(all_data)} cases to {self.cases_json_path}")
+                
+                # Save to CSV
+                if all_data:
+                    self._save_cases_to_csv(all_data)
+            else:
+                # Handle candidate data (default)
+                summary = {
+                    'total_candidates': len(all_data),
+                    'last_updated': datetime.now().isoformat(),
+                    'candidates': all_data
+                }
+                
+                # Save to JSON
+                with open(self.candidates_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+                    
+                logger.info(f"Saved {len(all_data)} candidates to {self.candidates_json_path}")
+                
+                # Save to CSV
+                if all_data:
+                    self._save_to_csv(all_data)
                 
             return True
             
         except Exception as e:
-            logger.error(f"Error saving consolidated results: {e}")
+            logger.error(f"Error saving consolidated {data_type} results: {e}")
             return False
+
+    def _save_cases_to_csv(self, cases: List[Dict[str, Any]]):
+        """Save cases to CSV file"""
+        try:
+            # Use pandas for better CSV handling
+            df = pd.DataFrame(cases)
+            
+            # Reorder columns for better readability
+            column_order = [
+                'jobcase_id', 'job_title', 'company_name', 'job_status',
+                'assigned_team', 'drafter', 'client_id', 'total_connected_candidates',
+                'created_date', 'updated_date', 'location', 'salary_range',
+                'employment_type', 'detail_url'
+            ]
+            
+            # Only include columns that exist
+            columns = [col for col in column_order if col in df.columns]
+            df = df[columns]
+            
+            # Convert candidate_ids list to comma-separated string for CSV
+            if 'candidate_ids' in df.columns:
+                df['candidate_ids'] = df['candidate_ids'].apply(
+                    lambda x: ','.join(map(str, x)) if isinstance(x, list) else str(x)
+                )
+            
+            # Save to CSV
+            df.to_csv(self.cases_csv_path, index=False, encoding='utf-8-sig')
+            logger.info(f"Saved cases to {self.cases_csv_path}")
+            
+        except ImportError:
+            # Fallback if pandas not available
+            self._save_cases_to_csv_basic(cases)
+        except Exception as e:
+            logger.error(f"Error saving cases to CSV: {e}")
+            
+    def _save_cases_to_csv_basic(self, cases: List[Dict[str, Any]]):
+        """Basic CSV save for cases without pandas"""
+        if not cases:
+            return
+            
+        # Get all unique fields
+        fieldnames = set()
+        for case in cases:
+            fieldnames.update(case.keys())
+            
+        # Define preferred order for cases
+        field_order = [
+            'jobcase_id', 'job_title', 'company_name', 'job_status',
+            'assigned_team', 'drafter', 'client_id', 'created_date', 'updated_date'
+        ]
+        
+        # Sort fields with preferred order first
+        ordered_fields = []
+        for field in field_order:
+            if field in fieldnames:
+                ordered_fields.append(field)
+                
+        # Add remaining fields
+        for field in sorted(fieldnames):
+            if field not in ordered_fields:
+                ordered_fields.append(field)
+                
+        # Prepare data for CSV (convert lists to strings)
+        csv_data = []
+        for case in cases:
+            row = {}
+            for field in ordered_fields:
+                value = case.get(field, '')
+                if isinstance(value, list):
+                    row[field] = ','.join(map(str, value))
+                else:
+                    row[field] = value
+            csv_data.append(row)
+                
+        # Write CSV
+        with open(self.cases_csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=ordered_fields)
+            writer.writeheader()
+            writer.writerows(csv_data)
             
     def _save_to_csv(self, candidates: List[Dict[str, Any]]):
         """Save candidates to CSV file"""

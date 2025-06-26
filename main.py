@@ -12,7 +12,7 @@ import time
 
 from config import config
 from login_session import ERPSession
-from scraper import ERPScraper, CandidateInfo
+from scraper import ERPScraper, CandidateInfo, JobCaseInfo
 from downloader import PDFDownloader
 from metadata_saver import MetadataSaver
 from file_utils import (
@@ -85,8 +85,7 @@ class ERPResumeHarvester:
                 logging.error("Configuration validation failed")
                 return False
                 
-            # Create directories
-            config.create_directories()
+
             
             # Initialize session
             self.session = ERPSession(
@@ -107,6 +106,7 @@ class ERPResumeHarvester:
             
             # Initialize other components
             self.scraper = ERPScraper(config.erp_base_url)
+            self.scraper.session = self.session  # Pass session for additional page fetching
             self.downloader = PDFDownloader(
                 session=self.session,
                 max_retries=config.max_retries,
@@ -463,10 +463,220 @@ class ERPResumeHarvester:
         logging.info(f"ID range processing complete: {successful_count}/{len(candidate_ids)} successful")
         return successful_count > 0
 
+    def harvest_cases(self, start_page: int = 1, 
+                     specific_id: Optional[str] = None,
+                     id_range: Optional[str] = None) -> bool:
+        """
+        Harvest cases from ERP system
+        
+        Args:
+            start_page: Starting page number for full harvest
+            specific_id: Process only this specific case ID
+            id_range: Process range of IDs (format: "3897-3895" or "3895,3896,3897")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not self.initialize():
+                return False
+                
+            self.stats['start_time'] = datetime.now()
+            
+            if specific_id:
+                logging.info(f"Processing specific case: {specific_id}")
+                success = self._process_specific_case(specific_id) is not None
+            elif id_range:
+                logging.info(f"Processing case ID range: {id_range}")
+                success = self._process_case_id_range(id_range)
+            else:
+                logging.info("Starting full case harvest process...")
+                success = self._process_all_cases(start_page)
+                
+            self.stats['end_time'] = datetime.now()
+            self._print_summary()
+            
+            return success
+            
+        except KeyboardInterrupt:
+            logging.info("Case harvest interrupted by user")
+            return False
+        except Exception as e:
+            logging.error(f"Error during case harvest: {e}")
+            return False
+        finally:
+            self.cleanup()
+
+    def _process_all_cases(self, start_page: int) -> bool:
+        """Process all cases from multiple pages"""
+        all_cases = []
+        page = start_page
+        
+        # Try case list URL
+        while page <= config.max_pages:
+            list_url = f"{config.erp_base_url}{config.case_list_url}".format(page=page)
+            logging.info(f"Fetching case list from: {list_url}")
+            
+            try:
+                response = self.session.get(list_url)
+                html = response.text if hasattr(response, 'text') else str(response)
+                
+                # Parse cases from this page
+                cases = self.scraper.parse_jobcase_list(html)
+                if not cases:
+                    logging.info(f"No cases found on page {page}")
+                    break
+                    
+                logging.info(f"Found {len(cases)} cases on page {page}")
+                self.stats['pages_processed'] += 1
+                
+                # Process each case
+                for case in cases:
+                    case_info = self._process_case(case)
+                    if case_info:
+                        all_cases.append(case_info)
+                        self.stats['candidates_found'] += 1  # Reusing for cases
+                        
+                    time.sleep(config.request_delay)
+                    
+                page += 1
+                time.sleep(config.page_delay)
+                
+            except Exception as e:
+                logging.error(f"Error processing page {page}: {e}")
+                break
+                
+        # Save consolidated results
+        if all_cases:
+            self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
+            
+        return len(all_cases) > 0
+
+    def _process_specific_case(self, case_id: str, save_individual: bool = True) -> Optional[Dict[str, Any]]:
+        """Process a specific case by ID"""
+        try:
+            detail_url = f"{config.erp_base_url}{config.case_detail_url}".format(id=case_id)
+            logging.info(f"Fetching case details from: {detail_url}")
+            
+            response = self.session.get(detail_url)
+            html = response.text if hasattr(response, 'text') else str(response)
+            
+            # Parse case details
+            case_info = self.scraper.parse_jobcase_detail(html, case_id)
+            
+            # Save metadata if requested
+            if save_individual:
+                self.metadata_saver.save_case_metadata(case_info.to_dict())
+                
+            return case_info.to_dict()
+            
+        except Exception as e:
+            logging.error(f"Error processing case {case_id}: {e}")
+            return None
+
+    def _process_case(self, case_basic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Process a case with full details"""
+        case_id = case_basic.get('jobcase_id')
+        if not case_id:
+            logging.warning("No case ID found in basic info")
+            return None
+            
+        logging.info(f"Processing case: {case_id}")
+        
+        try:
+            # Get full case details
+            detail_url = case_basic.get('detail_url')
+            if not detail_url:
+                detail_url = f"{config.erp_base_url}{config.case_detail_url}".format(id=case_id)
+                
+            response = self.session.get(detail_url)
+            html = response.text if hasattr(response, 'text') else str(response)
+            
+            # Parse detailed information
+            case_info = self.scraper.parse_jobcase_detail(html, case_id)
+            
+            # Save metadata
+            self.metadata_saver.save_case_metadata(case_info.to_dict())
+            
+            return case_info.to_dict()
+            
+        except Exception as e:
+            logging.error(f"Error processing case {case_id}: {e}")
+            return None
+
+    def _process_case_id_range(self, id_range: str) -> bool:
+        """Process a range of case IDs"""
+        case_ids = []
+        
+        # Parse different range formats (same logic as candidates)
+        if '-' in id_range:
+            try:
+                parts = id_range.split('-')
+                if len(parts) == 2:
+                    start_id = int(parts[0])
+                    end_id = int(parts[1])
+                    
+                    if start_id > end_id:
+                        case_ids = list(range(start_id, end_id - 1, -1))
+                    else:
+                        case_ids = list(range(start_id, end_id + 1))
+                else:
+                    raise ValueError("Invalid range format")
+            except ValueError:
+                logging.error(f"Invalid range format: {id_range}")
+                return False
+                
+        elif ',' in id_range:
+            try:
+                case_ids = [int(id_str.strip()) for id_str in id_range.split(',')]
+            except ValueError:
+                logging.error(f"Invalid comma-separated format: {id_range}")
+                return False
+        else:
+            logging.error(f"Invalid ID range format: {id_range}")
+            return False
+            
+        if not case_ids:
+            logging.error("No case IDs generated from range")
+            return False
+            
+        logging.info(f"Processing {len(case_ids)} cases: {case_ids[0]} to {case_ids[-1]}")
+        
+        all_cases = []
+        successful_count = 0
+        
+        for i, case_id in enumerate(case_ids, 1):
+            logging.info(f"Processing case {i}/{len(case_ids)}: {case_id}")
+            
+            case_info = self._process_specific_case(str(case_id), save_individual=False)
+            if case_info:
+                all_cases.append(case_info)
+                successful_count += 1
+                logging.info(f"✅ Successfully processed case {case_id}")
+            else:
+                logging.warning(f"❌ Failed to process case {case_id}")
+                
+            if i < len(case_ids):
+                time.sleep(config.request_delay)
+                
+        # Save consolidated results
+        if all_cases:
+            logging.info(f"Saving consolidated case results for {len(all_cases)} cases")
+            self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
+            
+        logging.info(f"Case ID range processing complete: {successful_count}/{len(case_ids)} successful")
+        return successful_count > 0
+
 
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(description='ERP Resume Harvester')
+    parser.add_argument(
+        '--type',
+        choices=['candidate', 'case'],
+        default='candidate',
+        help='Type of data to harvest: candidate or case (default: candidate)'
+    )
     parser.add_argument(
         '--selenium', 
         action='store_true',
@@ -481,7 +691,7 @@ def main():
     parser.add_argument(
         '--id',
         type=str,
-        help='Process specific candidate ID'
+        help='Process specific candidate/case ID'
     )
     parser.add_argument(
         '--range',
@@ -500,13 +710,21 @@ def main():
     # Setup logging
     setup_logging(args.log_level)
     
-    # Run harvester
+    # Run harvester based on type
     harvester = ERPResumeHarvester(use_selenium=args.selenium)
-    success = harvester.harvest_candidates(
-        start_page=args.page,
-        specific_id=args.id,
-        id_range=args.range
-    )
+    
+    if args.type == 'case':
+        success = harvester.harvest_cases(
+            start_page=args.page,
+            specific_id=args.id,
+            id_range=args.range
+        )
+    else:  # candidate (default)
+        success = harvester.harvest_candidates(
+            start_page=args.page,
+            specific_id=args.id,
+            id_range=args.range
+        )
     
     sys.exit(0 if success else 1)
 

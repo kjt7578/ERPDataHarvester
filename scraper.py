@@ -8,6 +8,7 @@ from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, asdict
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,37 @@ class CandidateInfo:
     position: Optional[str] = None
     detail_url: Optional[str] = None
     url_id: Optional[str] = None  # URL ID for reference (e.g., 65586)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return asdict(self)
+
+
+@dataclass
+class JobCaseInfo:
+    """Data class for storing job case information"""
+    jobcase_id: str
+    job_title: str
+    created_date: str
+    updated_date: str
+    company_name: Optional[str] = None  # CJ Foodville
+    job_description: Optional[str] = None
+    requirements: Optional[str] = None
+    salary_range: Optional[str] = None
+    location: Optional[str] = None
+    department: Optional[str] = None
+    employment_type: Optional[str] = None  # Full-time, Part-time, Contract
+    experience_level: Optional[str] = None
+    job_status: Optional[str] = None  # Manage Hiree, Active, Closed, Draft
+    posting_date: Optional[str] = None
+    closing_date: Optional[str] = None
+    document_url: Optional[str] = None  # Job description PDF
+    detail_url: Optional[str] = None
+    url_id: Optional[str] = None
+    assigned_team: Optional[str] = None  # PST HQ
+    drafter: Optional[str] = None  # Sean Kim
+    client_id: Optional[str] = None  # 245
+    candidate_ids: Optional[List[str]] = None  # Connected candidate IDs
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -543,6 +575,486 @@ class ERPScraper:
             logger.error(f"Error finding resume URL: {e}")
             return None
         
+    def parse_jobcase_list(self, html: str) -> List[Dict[str, str]]:
+        """
+        Parse jobcase list page to extract basic info and detail URLs
+        
+        Args:
+            html: HTML content of jobcase list page
+            
+        Returns:
+            List of dictionaries with jobcase info
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        jobcases = []
+        
+        logger.info(f"HTML length: {len(html)} characters")
+        logger.debug(f"HTML preview: {html[:1000]}...")
+        
+        # HRcap ERP jobcase specific patterns
+        jobcase_selectors = [
+            'tr[onclick*="dispEdit"]',  # HRcap case edit pattern
+            'tr[onclick*="case"]',
+            'table tr:has(td)',  # Table rows with cells
+            'tbody tr',
+            '.case-row',
+            'tr.case',
+        ]
+        
+        jobcase_rows = None
+        for selector in jobcase_selectors:
+            try:
+                jobcase_rows = soup.select(selector)
+                if jobcase_rows:
+                    logger.info(f"Found {len(jobcase_rows)} jobcases using selector: {selector}")
+                    break
+            except Exception as e:
+                logger.debug(f"Selector {selector} failed: {e}")
+                
+        # Fallback to general patterns
+        if not jobcase_rows:
+            general_selectors = [
+                'tr.case-row',
+                'div.case-item', 
+                'li.case',
+                'tr[data-case-id]',
+                'div[data-case-id]',
+            ]
+            
+            for selector in general_selectors:
+                try:
+                    jobcase_rows = soup.select(selector)
+                    if jobcase_rows:
+                        logger.info(f"Found {len(jobcase_rows)} jobcases using general selector: {selector}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    
+        # Last resort - find any table with data
+        if not jobcase_rows:
+            logger.warning("No jobcases found with specific selectors, trying table analysis...")
+            tables = soup.find_all('table')
+            logger.info(f"Found {len(tables)} tables on page")
+            
+            for i, table in enumerate(tables):
+                rows = table.find_all('tr')
+                if len(rows) > 1:  # Has header + data rows
+                    data_rows = rows[1:]
+                    if data_rows:
+                        logger.info(f"Table {i+1} has {len(data_rows)} data rows")
+                        sample_row = data_rows[0]
+                        cells = sample_row.find_all(['td', 'th'])
+                        logger.info(f"Sample row has {len(cells)} cells")
+                        
+                        has_links = sample_row.find('a') is not None
+                        has_onclick = sample_row.get('onclick') is not None
+                        cell_texts = [cell.get_text(strip=True)[:50] for cell in cells[:5]]
+                        logger.info(f"Sample row - has_links: {has_links}, has_onclick: {has_onclick}")
+                        logger.info(f"Cell texts: {cell_texts}")
+                        
+                        if has_links or has_onclick or len(cells) >= 3:
+                            jobcase_rows = data_rows
+                            logger.info(f"Using table {i+1} with {len(data_rows)} rows")
+                            break
+                            
+        if not jobcase_rows:
+            logger.error("No jobcase rows found in HTML")
+            all_links = soup.find_all('a', href=True)
+            logger.info(f"Found {len(all_links)} links on page")
+            for link in all_links[:5]:
+                logger.info(f"Link: {link.get('href')} - Text: {link.get_text(strip=True)[:50]}")
+            return jobcases
+            
+        logger.info(f"Processing {len(jobcase_rows)} jobcase rows")
+        for i, row in enumerate(jobcase_rows):
+            try:
+                jobcase = self.extract_jobcase_from_row(row)
+                if jobcase:
+                    jobcases.append(jobcase)
+                    logger.debug(f"Extracted jobcase {i+1}: {jobcase.get('jobcase_id', 'unknown')} - {jobcase.get('job_title', 'unknown')}")
+                else:
+                    logger.debug(f"Failed to extract jobcase from row {i+1}")
+            except Exception as e:
+                logger.error(f"Error parsing jobcase row {i+1}: {e}")
+                
+        logger.info(f"Successfully extracted {len(jobcases)} jobcases")
+        return jobcases
+        
+    def extract_jobcase_from_row(self, row) -> Optional[Dict[str, str]]:
+        """
+        Extract jobcase information from a single row/element
+        
+        Args:
+            row: BeautifulSoup element containing jobcase data
+            
+        Returns:
+            Dictionary with jobcase info or None
+        """
+        jobcase = {}
+        
+        # Try to extract ID
+        jobcase_id = None
+        
+        # Method 1: From data attribute
+        if row.get('data-case-id'):
+            jobcase_id = row.get('data-case-id')
+        
+        # Method 2: From link
+        if not jobcase_id:
+            link = row.find('a', href=True)
+            if link:
+                href = link['href']
+                # Extract ID from URL patterns like /case/dispEdit/3897
+                id_match = re.search(r'/dispEdit/(\d+)', href)
+                if id_match:
+                    jobcase_id = id_match.group(1)
+                    
+        # Method 3: From text content
+        if not jobcase_id:
+            id_cell = row.find(text=re.compile(r'^\d{3,}$'))
+            if id_cell:
+                jobcase_id = id_cell.strip()
+                
+        if not jobcase_id:
+            return None
+            
+        jobcase['jobcase_id'] = jobcase_id
+        
+        # Extract job title
+        job_title = None
+        title_patterns = [
+            row.find('td', class_='title'),
+            row.find('span', class_='case-title'),
+            row.find('a', class_='title-link'),
+        ]
+        
+        for element in title_patterns:
+            if element:
+                job_title = element.get_text(strip=True)
+                break
+                
+        if not job_title:
+            # Try to find title in link text
+            links = row.find_all('a')
+            for link in links:
+                text = link.get_text(strip=True)
+                if text and not text.isdigit() and len(text) > 2:
+                    job_title = text
+                    break
+                    
+        jobcase['job_title'] = job_title or 'Unknown'
+        
+        # Extract detail URL
+        detail_link = row.find('a', href=True)
+        if detail_link:
+            jobcase['detail_url'] = urljoin(self.base_url, detail_link['href'])
+            
+        # Try to extract dates if available in list view
+        date_cells = row.find_all('td')
+        for cell in date_cells:
+            text = cell.get_text(strip=True)
+            if re.match(r'\d{4}-\d{2}-\d{2}', text):
+                if 'created_date' not in jobcase:
+                    jobcase['created_date'] = text
+                else:
+                    jobcase['updated_date'] = text
+                    
+        return jobcase
+        
+    def parse_jobcase_detail(self, html: str, jobcase_id: str) -> JobCaseInfo:
+        """
+        Parse HRcap ERP jobcase detail page to extract complete information
+        
+        Args:
+            html: HTML content of detail page
+            jobcase_id: JobCase URL ID (will be replaced with actual Case No)
+            
+        Returns:
+            JobCaseInfo object with extracted data
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Initialize with defaults
+        url_id = jobcase_id  # Keep URL ID as backup
+        info = {
+            'jobcase_id': jobcase_id,  # Will be updated with actual Case No
+            'job_title': 'Unknown',
+            'created_date': datetime.now().strftime('%Y-%m-%d'),
+            'updated_date': datetime.now().strftime('%Y-%m-%d'),
+        }
+        
+        # Extract actual Case No (not URL ID)
+        try:
+            # Try multiple patterns for Case No
+            case_patterns = ['Case No', 'Case Number', 'CaseNo', 'Case ID']
+            actual_case_id = None
+            
+            for pattern in case_patterns:
+                case_no_th = soup.find('th', string=pattern)
+                if not case_no_th:
+                    # Try partial match
+                    case_no_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if case_no_th:
+                    case_no_td = case_no_th.find_next_sibling('td')
+                    if case_no_td:
+                        actual_case_id = case_no_td.get_text(strip=True)
+                        info['jobcase_id'] = actual_case_id
+                        logger.info(f"Found actual Case No: {actual_case_id} (URL ID: {jobcase_id}) using pattern: {pattern}")
+                        break
+                        
+            # If still not found, try looking for text containing case number
+            if not actual_case_id:
+                # Look for title that might contain case number like "Case 13897 : HRCap"
+                title_tag = soup.find('title')
+                if title_tag:
+                    title_text = title_tag.get_text()
+                    case_match = re.search(r'Case\s+(\d+)', title_text, re.IGNORECASE)
+                    if case_match:
+                        actual_case_id = case_match.group(1)
+                        info['jobcase_id'] = actual_case_id
+                        logger.info(f"Found actual Case No from title: {actual_case_id} (URL ID: {jobcase_id})")
+                        
+            if not actual_case_id:
+                logger.warning(f"Case No not found in any pattern, keeping URL ID: {jobcase_id}")
+                
+        except Exception as e:
+            logger.debug(f"Failed to extract Case No: {e}")
+            logger.warning(f"Case No extraction failed, keeping URL ID: {jobcase_id}")
+            
+        # Extract company name from Client table row
+        try:
+            client_th = soup.find('th', string='Client')
+            if client_th:
+                client_td = client_th.find_next_sibling('td')
+                if client_td:
+                    info['company_name'] = client_td.get_text(strip=True)
+                    logger.info(f"Found company name: {info['company_name']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract company name: {e}")
+            
+        # Extract position title
+        try:
+            position_th = soup.find('th', string='Position Title')
+            if position_th:
+                position_td = position_th.find_next_sibling('td')
+                if position_td:
+                    info['job_title'] = position_td.get_text(strip=True)
+                    logger.info(f"Found position title: {info['job_title']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract position title: {e}")
+            
+        # Extract case status
+        try:
+            status_th = soup.find('th', string='Case Status')
+            if status_th:
+                status_td = status_th.find_next_sibling('td')
+                if status_td:
+                    info['job_status'] = status_td.get_text(strip=True)
+                    logger.info(f"Found case status: {info['job_status']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract case status: {e}")
+            
+        # Extract register date
+        try:
+            register_th = soup.find('th', string='Register Date')
+            if register_th:
+                register_td = register_th.find_next_sibling('td')
+                if register_td:
+                    date_text = register_td.get_text(strip=True)
+                    # Convert MM/DD/YYYY to YYYY-MM-DD
+                    date_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', date_text)
+                    if date_match:
+                        month, day, year = date_match.groups()
+                        info['created_date'] = f"{year}-{month}-{day}"
+                        logger.info(f"Found register date: {info['created_date']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract register date: {e}")
+            
+        # Extract assigned team
+        try:
+            team_th = soup.find('th', string='Assigned Team')
+            if team_th:
+                team_td = team_th.find_next_sibling('td')
+                if team_td:
+                    info['assigned_team'] = team_td.get_text(strip=True)
+                    logger.info(f"Found assigned team: {info['assigned_team']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract assigned team: {e}")
+            
+        # Extract drafter
+        try:
+            drafter_th = soup.find('th', string='Drafter')
+            if drafter_th:
+                drafter_td = drafter_th.find_next_sibling('td')
+                if drafter_td:
+                    info['drafter'] = drafter_td.get_text(strip=True)
+                    logger.info(f"Found drafter: {info['drafter']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract drafter: {e}")
+            
+        # Extract connected candidate IDs by visiting each candidate page
+        candidate_ids = []
+        try:
+            # Find all elements with openCandidate onclick to get URL IDs
+            onclick_elements = soup.find_all(attrs={'onclick': re.compile(r'openCandidate\(\d+\)')})
+            candidate_url_ids = []
+            for element in onclick_elements:
+                onclick = element.get('onclick')
+                if onclick:
+                    id_match = re.search(r'openCandidate\((\d+)\)', onclick)
+                    if id_match:
+                        url_candidate_id = id_match.group(1)
+                        candidate_url_ids.append(url_candidate_id)
+                        logger.info(f"Found candidate URL ID: {url_candidate_id}")
+            
+            # Visit each candidate page to get actual Candidate ID
+            if hasattr(self, 'session') and self.session:
+                for candidate_url_id in candidate_url_ids:
+                    try:
+                        candidate_url = f"{self.base_url}/candidate/dispView/{candidate_url_id}"
+                        logger.info(f"Fetching candidate details from: {candidate_url}")
+                        
+                        response = self.session.get(candidate_url)
+                        candidate_html = response.text if hasattr(response, 'text') else str(response)
+                        candidate_soup = BeautifulSoup(candidate_html, 'html.parser')
+                        
+                        # Extract actual Candidate ID
+                        candidate_id_th = candidate_soup.find('th', string='Candidate ID')
+                        if candidate_id_th:
+                            candidate_id_td = candidate_id_th.find_next_sibling('td')
+                            if candidate_id_td:
+                                actual_candidate_id = candidate_id_td.get_text(strip=True)
+                                candidate_ids.append(actual_candidate_id)
+                                logger.info(f"Found actual Candidate ID: {actual_candidate_id} (from URL ID: {candidate_url_id})")
+                            else:
+                                # Fallback to URL ID if actual ID not found
+                                candidate_ids.append(candidate_url_id)
+                                logger.warning(f"Candidate ID td not found, using URL ID: {candidate_url_id}")
+                        else:
+                            # Fallback to URL ID if actual ID not found  
+                            candidate_ids.append(candidate_url_id)
+                            logger.warning(f"Candidate ID th not found, using URL ID: {candidate_url_id}")
+                            
+                        time.sleep(1)  # Brief delay between requests
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to fetch candidate {candidate_url_id}: {e}")
+                        # Fallback to URL ID if page fetch fails
+                        candidate_ids.append(candidate_url_id)
+            else:
+                # Fallback to URL IDs if session not available
+                candidate_ids = candidate_url_ids
+                logger.warning("Session not available, using URL IDs for candidates")
+                        
+            info['candidate_ids'] = candidate_ids
+            logger.info(f"Total connected candidates: {len(candidate_ids)}")
+        except Exception as e:
+            logger.debug(f"Failed to extract candidate IDs: {e}")
+            info['candidate_ids'] = []
+            
+        # Extract client ID by visiting client page
+        try:
+            client_info_link = soup.find('a', href=re.compile(r'/client/dispEdit/\d+'))
+            if client_info_link and hasattr(self, 'session') and self.session:
+                client_url = urljoin(self.base_url, client_info_link['href'])
+                logger.info(f"Fetching client details from: {client_url}")
+                
+                response = self.session.get(client_url)
+                client_html = response.text if hasattr(response, 'text') else str(response)
+                client_soup = BeautifulSoup(client_html, 'html.parser')
+                
+                # Try multiple patterns to find Client ID
+                actual_client_id = None
+                
+                # Pattern 1: Find th with "Client Id" text
+                client_id_th = client_soup.find('th', string=re.compile(r'Client\s*Id', re.I))
+                if client_id_th:
+                    client_id_td = client_id_th.find_next_sibling('td')
+                    if client_id_td:
+                        client_id_text = client_id_td.get_text(strip=True)
+                        # Remove # if present
+                        actual_client_id = client_id_text.replace('#', '').strip()
+                        logger.info(f"Found actual Client ID (pattern 1): {actual_client_id}")
+                
+                # Pattern 2: Find any th containing "Client" and "Id"
+                if not actual_client_id:
+                    for th in client_soup.find_all('th'):
+                        th_text = th.get_text(strip=True)
+                        if 'client' in th_text.lower() and 'id' in th_text.lower():
+                            client_id_td = th.find_next_sibling('td')
+                            if client_id_td:
+                                client_id_text = client_id_td.get_text(strip=True)
+                                actual_client_id = client_id_text.replace('#', '').strip()
+                                logger.info(f"Found actual Client ID (pattern 2): {actual_client_id} from header: {th_text}")
+                                break
+                
+                # Pattern 3: Find in page title or main header
+                if not actual_client_id:
+                    # Check page title for Client ID
+                    title = client_soup.find('title')
+                    if title:
+                        title_text = title.get_text(strip=True)
+                        client_id_match = re.search(r'Client\s*Id\s*[:#]?\s*(\d+)', title_text, re.I)
+                        if client_id_match:
+                            actual_client_id = client_id_match.group(1)
+                            logger.info(f"Found actual Client ID (pattern 3 - title): {actual_client_id}")
+                    
+                    # Check main headers
+                    if not actual_client_id:
+                        for header in client_soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                            header_text = header.get_text(strip=True)
+                            client_id_match = re.search(r'Client\s*Id\s*[:#]?\s*(\d+)', header_text, re.I)
+                            if client_id_match:
+                                actual_client_id = client_id_match.group(1)
+                                logger.info(f"Found actual Client ID (pattern 3 - header): {actual_client_id}")
+                                break
+                
+                # Pattern 4: Search all text for Client ID pattern
+                if not actual_client_id:
+                    page_text = client_soup.get_text()
+                    client_id_matches = re.findall(r'Client\s*Id\s*[:#]?\s*(\d+)', page_text, re.I)
+                    if client_id_matches:
+                        actual_client_id = client_id_matches[0]  # Take first match
+                        logger.info(f"Found actual Client ID (pattern 4 - text search): {actual_client_id}")
+                
+                if actual_client_id:
+                    info['client_id'] = actual_client_id
+                else:
+                    # Fallback to URL ID if no actual ID found
+                    href = client_info_link['href']
+                    client_id_match = re.search(r'/client/dispEdit/(\d+)', href)
+                    if client_id_match:
+                        info['client_id'] = client_id_match.group(1)
+                        logger.warning(f"No actual Client ID found, using URL ID: {info['client_id']}")
+                        
+                time.sleep(1)  # Brief delay
+                
+            elif client_info_link:
+                # Fallback to URL ID if session not available
+                href = client_info_link['href']
+                client_id_match = re.search(r'/client/dispEdit/(\d+)', href)
+                if client_id_match:
+                    info['client_id'] = client_id_match.group(1)
+                    logger.warning(f"Session not available, using Client URL ID: {info['client_id']}")
+        except Exception as e:
+            logger.debug(f"Failed to extract client ID: {e}")
+            
+        # Set URL ID for reference
+        info['url_id'] = jobcase_id  # Store original URL ID for reference
+        
+        # For JobCaseInfo compatibility, set required fields
+        if 'company_name' not in info:
+            info['company_name'] = 'Unknown'
+        if 'assigned_team' not in info:
+            info['assigned_team'] = None
+        if 'drafter' not in info:
+            info['drafter'] = None
+        if 'client_id' not in info:
+            info['client_id'] = None
+            
+        return JobCaseInfo(**info)
+
     def extract_pagination_info(self, html: str) -> Dict[str, Any]:
         """
         Extract pagination information from list page

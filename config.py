@@ -14,10 +14,21 @@ class Config:
     """Configuration class for managing all settings"""
     
     def __init__(self):
+        # Load environment variables from .env if present
+        self._load_env_file()
+        
         # ERP System Configuration
         self.erp_base_url = os.getenv('ERP_BASE_URL', 'http://erp.hrcap.com')
         self.erp_username = os.getenv('ERP_USERNAME', '')
         self.erp_password = os.getenv('ERP_PASSWORD', '')
+        
+        # URL Patterns
+        self.candidate_list_url = '/searchcandidate/dispSearchList/{page}'
+        self.candidate_detail_url = '/candidate/dispView/{id}'
+        self.case_list_url = '/case/dispList/{page}'
+        self.case_detail_url = '/case/dispEdit/{id}'
+        self.client_detail_url = '/client/dispEdit/{id}'
+        self.login_url = '/mem/dispLogin'
         
         # Paths Configuration
         self.resumes_dir = Path(os.getenv('RESUMES_DIR', './resumes'))
@@ -26,24 +37,24 @@ class Config:
         self.logs_dir = Path(os.getenv('LOGS_DIR', './logs'))
         
         # Scraping Configuration
-        self.page_load_timeout = int(os.getenv('PAGE_LOAD_TIMEOUT', '30'))
-        self.download_timeout = int(os.getenv('DOWNLOAD_TIMEOUT', '60'))
-        self.max_retries = int(os.getenv('MAX_RETRIES', '3'))
-        self.retry_delay = int(os.getenv('RETRY_DELAY', '5'))
+        self.page_load_timeout = self._get_int_env('PAGE_LOAD_TIMEOUT', 30)
+        self.download_timeout = self._get_int_env('DOWNLOAD_TIMEOUT', 60)
+        self.max_retries = self._get_int_env('MAX_RETRIES', 3)
+        self.retry_delay = self._get_float_env('RETRY_DELAY', 5.0)
         
         # Speed control for server protection
-        self.request_delay = float(os.getenv('REQUEST_DELAY', '2.0'))  # 2 second delay
-        self.page_delay = float(os.getenv('PAGE_DELAY', '3.0'))       # 3 second delay between pages
+        self.request_delay = self._get_float_env('REQUEST_DELAY', 2.0)
+        self.page_delay = self._get_float_env('PAGE_DELAY', 3.0)
         
         # Pagination
-        self.items_per_page = int(os.getenv('ITEMS_PER_PAGE', '20'))
-        self.max_pages = int(os.getenv('MAX_PAGES', '2'))  # Limited to 2 pages for testing
+        self.items_per_page = self._get_int_env('ITEMS_PER_PAGE', 20)
+        self.max_pages = self._get_int_env('MAX_PAGES', 2)
         
         # File naming
         self.file_name_pattern = os.getenv('FILE_NAME_PATTERN', '{name}_{id}_resume')
         
         # Logging
-        self.log_level = os.getenv('LOG_LEVEL', 'DEBUG')
+        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_format = os.getenv(
             'LOG_FORMAT', 
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -55,16 +66,69 @@ class Config:
         
         # MySQL Database (Optional)
         self.db_host = os.getenv('DB_HOST', 'localhost')
-        self.db_port = int(os.getenv('DB_PORT', '3306'))
+        self.db_port = self._get_int_env('DB_PORT', 3306)
         self.db_name = os.getenv('DB_NAME', 'erp_resumes')
         self.db_user = os.getenv('DB_USER', '')
         self.db_password = os.getenv('DB_PASSWORD', '')
         
         # Scheduler (Optional)
         self.schedule_enabled = os.getenv('SCHEDULE_ENABLED', 'false').lower() == 'true'
-        self.schedule_interval_minutes = int(os.getenv('SCHEDULE_INTERVAL_MINUTES', '10'))
+        self.schedule_interval_minutes = self._get_int_env('SCHEDULE_INTERVAL_MINUTES', 10)
         
-    def create_directories(self):
+        # Create directories if they don't exist
+        self._create_directories()
+        
+    def _get_clean_env(self, key: str, default: str = '') -> str:
+        """Get environment variable and remove any comments"""
+        value = os.getenv(key, default)
+        if value and '#' in value:
+            # Remove everything after # (comment)
+            value = value.split('#')[0].strip()
+        return value
+    
+    def _get_int_env(self, key: str, default: int) -> int:
+        """Get integer environment variable with error handling"""
+        try:
+            value = self._get_clean_env(key, str(default))
+            return int(value)
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid integer value for {key}, using default: {default}")
+            return default
+    
+    def _get_float_env(self, key: str, default: float) -> float:
+        """Get float environment variable with error handling"""
+        try:
+            value = self._get_clean_env(key, str(default))
+            return float(value)
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid float value for {key}, using default: {default}")
+            return default
+    
+    def _load_env_file(self):
+        """Load environment variables from .env file if it exists"""
+        env_file = Path('.env')
+        if env_file.exists():
+            try:
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            # Remove comments from value
+                            if '#' in value:
+                                value = value.split('#')[0].strip()
+                            # Remove quotes if present
+                            if value.startswith('"') and value.endswith('"'):
+                                value = value[1:-1]
+                            elif value.startswith("'") and value.endswith("'"):
+                                value = value[1:-1]
+                            os.environ[key] = value
+            except Exception as e:
+                logging.warning(f"Failed to load .env file: {e}")
+    
+    def _create_directories(self):
         """Create all necessary directories"""
         directories = [
             self.resumes_dir,
@@ -74,7 +138,10 @@ class Config:
         ]
         
         for directory in directories:
-            directory.mkdir(parents=True, exist_ok=True)
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logging.error(f"Failed to create directory {directory}: {e}")
             
     def validate(self) -> bool:
         """Validate configuration settings"""
