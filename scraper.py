@@ -366,6 +366,72 @@ class ERPScraper:
                     name = title_text.split(' : ')[0].strip()
                     if name and name != 'HRCap':
                         info['name'] = name
+                        
+        # Method 3: Try to find name in Contact Information table
+        if info['name'] == 'Unknown':
+            try:
+                # Look for Contact Information section
+                contact_section = soup.find('h3', string=re.compile('Contact Information', re.I))
+                if contact_section:
+                    table = contact_section.find_next('table')
+                    if table:
+                        rows = table.find_all('tr')
+                        for row in rows:
+                            th = row.find('th')
+                            td = row.find('td')
+                            if th and td:
+                                header = th.get_text(strip=True)
+                                value = td.get_text(strip=True)
+                                if 'name' in header.lower() and value:
+                                    info['name'] = value
+                                    logger.info(f"Found name from Contact table: {value}")
+                                    break
+            except Exception as e:
+                logger.debug(f"Contact name extraction failed: {e}")
+                
+        # Method 4: Try to find name from any table cell that looks like a name
+        if info['name'] == 'Unknown':
+            try:
+                # Look for patterns like "Name: John Doe" in any td
+                td_elements = soup.find_all('td')
+                for td in td_elements:
+                    text = td.get_text(strip=True)
+                    # Pattern: "Name: John Doe" or "Name : John Doe"
+                    name_match = re.search(r'Name\s*[:]\s*(.+)', text, re.I)
+                    if name_match:
+                        name = name_match.group(1).strip()
+                        if name and len(name) > 1:
+                            info['name'] = name
+                            logger.info(f"Found name from table pattern: {name}")
+                            break
+            except Exception as e:
+                logger.debug(f"Pattern name extraction failed: {e}")
+                
+        # Method 5: Try to extract from page content (last resort)
+        if info['name'] == 'Unknown':
+            try:
+                # Look for common Korean/English name patterns in the page
+                page_text = soup.get_text()
+                # Pattern for Korean names (3-4 characters)
+                korean_name_match = re.search(r'[가-힣]{2,4}\s*(?:님|씨|후보자|지원자)?', page_text)
+                if korean_name_match:
+                    name = korean_name_match.group(0).replace('님', '').replace('씨', '').replace('후보자', '').replace('지원자', '').strip()
+                    if len(name) >= 2:
+                        info['name'] = name
+                        logger.info(f"Found Korean name pattern: {name}")
+                else:
+                    # Pattern for English names (First Last)
+                    english_name_match = re.search(r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b', page_text)
+                    if english_name_match:
+                        name = f"{english_name_match.group(1)} {english_name_match.group(2)}"
+                        info['name'] = name
+                        logger.info(f"Found English name pattern: {name}")
+            except Exception as e:
+                logger.debug(f"Content name extraction failed: {e}")
+                
+        # Log if still unknown
+        if info['name'] == 'Unknown':
+            logger.warning(f"Could not extract name for candidate {info['candidate_id']}, page might be empty or have different structure")
         
         # Extract dates from Profile Status section
         created_date = self._extract_hrcap_date(soup, 'Created')
