@@ -32,12 +32,12 @@ class Config:
         self.retry_delay = int(os.getenv('RETRY_DELAY', '5'))
         
         # Speed control for server protection
-        self.request_delay = float(os.getenv('REQUEST_DELAY', '2.0'))  # 2초 딜레이
-        self.page_delay = float(os.getenv('PAGE_DELAY', '3.0'))       # 페이지간 3초 딜레이
+        self.request_delay = float(os.getenv('REQUEST_DELAY', '2.0'))  # 2 second delay
+        self.page_delay = float(os.getenv('PAGE_DELAY', '3.0'))       # 3 second delay between pages
         
         # Pagination
         self.items_per_page = int(os.getenv('ITEMS_PER_PAGE', '20'))
-        self.max_pages = int(os.getenv('MAX_PAGES', '2'))  # 테스트용으로 2페이지로 제한
+        self.max_pages = int(os.getenv('MAX_PAGES', '2'))  # Limited to 2 pages for testing
         
         # File naming
         self.file_name_pattern = os.getenv('FILE_NAME_PATTERN', '{name}_{id}_resume')

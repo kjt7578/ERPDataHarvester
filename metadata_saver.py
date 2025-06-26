@@ -260,13 +260,57 @@ class MetadataSaver:
                 f.write(f"Success rate: {download_stats.get('success_rate', 0):.1f}%\n")
                 f.write(f"Total size: {download_stats.get('total_size_mb', 0):.2f} MB\n")
                 
+                # Add successfully downloaded candidates list
+                successful_list = download_stats.get('successful_candidates', [])
+                if successful_list:
+                    f.write("\n\nSuccessfully Downloaded Candidates:\n")
+                    f.write("-" * 40 + "\n")
+                    for i, candidate in enumerate(successful_list, 1):
+                        candidate_id = candidate.get('candidate_id', 'N/A')
+                        name = candidate.get('name', 'Unknown')
+                        size_mb = candidate.get('file_size_mb', 0)
+                        f.write(f"{i:3d}. ID: {candidate_id} | {name} | {size_mb:.2f} MB\n")
+                
+                # Add skipped candidates list
+                skipped_list = download_stats.get('skipped_candidates', [])
+                if skipped_list:
+                    f.write("\n\nSkipped Candidates (Already Downloaded):\n")
+                    f.write("-" * 40 + "\n")
+                    for i, candidate in enumerate(skipped_list, 1):
+                        candidate_id = candidate.get('candidate_id', 'N/A')
+                        name = candidate.get('name', 'Unknown')
+                        f.write(f"{i:3d}. ID: {candidate_id} | {name}\n")
+                
                 # Add failed candidates if available
                 failed_list = download_stats.get('failed_candidates', [])
                 if failed_list:
                     f.write("\n\nFailed Downloads:\n")
-                    f.write("-" * 30 + "\n")
-                    for candidate in failed_list:
-                        f.write(f"- {candidate.get('name', 'Unknown')} (ID: {candidate.get('candidate_id', 'N/A')})\n")
+                    f.write("-" * 40 + "\n")
+                    for i, candidate in enumerate(failed_list, 1):
+                        candidate_id = candidate.get('candidate_id', 'N/A')
+                        name = candidate.get('name', 'Unknown')
+                        error = candidate.get('error', 'Unknown error')
+                        f.write(f"{i:3d}. ID: {candidate_id} | {name} | Error: {error}\n")
+                
+                # Add summary by Candidate ID only
+                all_candidate_ids = []
+                all_candidate_ids.extend([c.get('candidate_id') for c in successful_list if c.get('candidate_id')])
+                all_candidate_ids.extend([c.get('candidate_id') for c in skipped_list if c.get('candidate_id')])
+                all_candidate_ids.extend([c.get('candidate_id') for c in failed_list if c.get('candidate_id')])
+                
+                if all_candidate_ids:
+                    f.write(f"\n\nAll Processed Candidate IDs ({len(all_candidate_ids)} total):\n")
+                    f.write("-" * 40 + "\n")
+                    # Sort IDs numerically if possible
+                    try:
+                        sorted_ids = sorted(all_candidate_ids, key=lambda x: int(x) if x.isdigit() else float('inf'))
+                    except:
+                        sorted_ids = sorted(all_candidate_ids)
+                    
+                    # Print IDs in rows of 10
+                    for i in range(0, len(sorted_ids), 10):
+                        row_ids = sorted_ids[i:i+10]
+                        f.write(", ".join(row_ids) + "\n")
                         
             logger.info(f"Generated download report: {report_path}")
             return report_path

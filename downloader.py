@@ -23,11 +23,11 @@ class PDFDownloader:
     def __init__(self, session: Any, max_retries: int = 3, 
                  retry_delay: int = 5, timeout: int = 60):
         """
-        Initialize downloader
+        Initialize PDF Downloader
         
         Args:
-            session: ERPSession instance or requests.Session
-            max_retries: Maximum number of retry attempts
+            session: HTTP session or ERPSession for downloading
+            max_retries: Maximum retry attempts
             retry_delay: Delay between retries in seconds
             timeout: Download timeout in seconds
         """
@@ -35,11 +35,16 @@ class PDFDownloader:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.timeout = timeout
+        
+        # Statistics tracking
         self.download_stats = {
             'successful': 0,
             'failed': 0,
             'skipped': 0,
-            'total_size_mb': 0.0
+            'total_size_mb': 0.0,
+            'successful_candidates': [],  # List of successful candidate info
+            'failed_candidates': [],      # List of failed candidate info
+            'skipped_candidates': []      # List of skipped candidate info
         }
         
     def download_resume(self, url: str, save_path: Path, 
@@ -65,6 +70,7 @@ class PDFDownloader:
             if validate_pdf_file(save_path):
                 logger.info(f"Resume already exists for {candidate_name} ({candidate_id})")
                 self.download_stats['skipped'] += 1
+                self.download_stats['skipped_candidates'].append(candidate_info)
                 return True
             else:
                 logger.warning(f"Invalid PDF exists for {candidate_name}, re-downloading")
@@ -88,6 +94,11 @@ class PDFDownloader:
                         size_mb = save_path.stat().st_size / (1024 * 1024)
                         self.download_stats['total_size_mb'] += size_mb
                         
+                        # Add file size to candidate info for reporting
+                        candidate_info_with_size = candidate_info.copy()
+                        candidate_info_with_size['file_size_mb'] = size_mb
+                        self.download_stats['successful_candidates'].append(candidate_info_with_size)
+                        
                         logger.info(f"Successfully downloaded resume for {candidate_name} ({size_mb:.2f} MB)")
                         return True
                     else:
@@ -108,6 +119,12 @@ class PDFDownloader:
                 
         # All attempts failed
         self.download_stats['failed'] += 1
+        
+        # Add error info to candidate info for reporting
+        candidate_info_with_error = candidate_info.copy()
+        candidate_info_with_error['error'] = f"Failed after {self.max_retries} attempts"
+        self.download_stats['failed_candidates'].append(candidate_info_with_error)
+        
         logger.error(f"Failed to download resume for {candidate_name} after {self.max_retries} attempts")
         return False
         
@@ -207,7 +224,10 @@ class PDFDownloader:
             'successful': 0,
             'failed': 0,
             'skipped': 0,
-            'total_size_mb': 0.0
+            'total_size_mb': 0.0,
+            'successful_candidates': [],
+            'failed_candidates': [],
+            'skipped_candidates': []
         }
         
     def estimate_download_time(self, file_count: int, 
