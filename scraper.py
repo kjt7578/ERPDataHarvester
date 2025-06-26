@@ -56,43 +56,100 @@ class ERPScraper:
         soup = BeautifulSoup(html, 'html.parser')
         candidates = []
         
-        # Common patterns for finding candidate rows
-        row_selectors = [
-            'tr.candidate-row',
-            'div.candidate-item',
-            'li.candidate',
-            'tr[data-candidate-id]',
-            'div[data-candidate-id]',
+        logger.info(f"HTML length: {len(html)} characters")
+        logger.debug(f"HTML preview: {html[:1000]}...")
+        
+        # HRcap ERP specific patterns first
+        hrcap_selectors = [
+            'tr[onclick*="dispView"]',  # HRcap specific onclick pattern
+            'tr[onclick*="candidate"]',
+            'table tr:has(td)',  # Table rows with cells
+            'tbody tr',
+            '.candidate-row',
+            'tr.candidate',
         ]
         
         candidate_rows = None
-        for selector in row_selectors:
-            candidate_rows = soup.select(selector)
-            if candidate_rows:
-                logger.debug(f"Found {len(candidate_rows)} candidates using selector: {selector}")
-                break
-                
-        if not candidate_rows:
-            # Try table rows if no specific class found
-            tables = soup.find_all('table')
-            for table in tables:
-                rows = table.find_all('tr')[1:]  # Skip header
-                if rows and len(rows) > 0:
-                    candidate_rows = rows
+        for selector in hrcap_selectors:
+            try:
+                candidate_rows = soup.select(selector)
+                if candidate_rows:
+                    logger.info(f"Found {len(candidate_rows)} candidates using HRcap selector: {selector}")
                     break
-                    
+            except Exception as e:
+                logger.debug(f"Selector {selector} failed: {e}")
+                
+        # Fallback to general patterns
         if not candidate_rows:
-            logger.warning("No candidate rows found in HTML")
+            general_selectors = [
+                'tr.candidate-row',
+                'div.candidate-item', 
+                'li.candidate',
+                'tr[data-candidate-id]',
+                'div[data-candidate-id]',
+            ]
+            
+            for selector in general_selectors:
+                try:
+                    candidate_rows = soup.select(selector)
+                    if candidate_rows:
+                        logger.info(f"Found {len(candidate_rows)} candidates using general selector: {selector}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    
+        # Last resort - find any table with data
+        if not candidate_rows:
+            logger.warning("No candidates found with specific selectors, trying table analysis...")
+            tables = soup.find_all('table')
+            logger.info(f"Found {len(tables)} tables on page")
+            
+            for i, table in enumerate(tables):
+                rows = table.find_all('tr')
+                if len(rows) > 1:  # Has header + data rows
+                    # Skip header row
+                    data_rows = rows[1:]
+                    if data_rows:
+                        logger.info(f"Table {i+1} has {len(data_rows)} data rows")
+                        # Check if rows contain candidate-like data
+                        sample_row = data_rows[0]
+                        cells = sample_row.find_all(['td', 'th'])
+                        logger.info(f"Sample row has {len(cells)} cells")
+                        
+                        # Look for patterns that suggest candidate data
+                        has_links = sample_row.find('a') is not None
+                        has_onclick = sample_row.get('onclick') is not None
+                        cell_texts = [cell.get_text(strip=True)[:50] for cell in cells[:5]]
+                        logger.info(f"Sample row - has_links: {has_links}, has_onclick: {has_onclick}")
+                        logger.info(f"Cell texts: {cell_texts}")
+                        
+                        if has_links or has_onclick or len(cells) >= 3:
+                            candidate_rows = data_rows
+                            logger.info(f"Using table {i+1} with {len(data_rows)} rows")
+                            break
+                            
+        if not candidate_rows:
+            logger.error("No candidate rows found in HTML")
+            # Log more details for debugging
+            all_links = soup.find_all('a', href=True)
+            logger.info(f"Found {len(all_links)} links on page")
+            for link in all_links[:5]:  # Show first 5 links
+                logger.info(f"Link: {link.get('href')} - Text: {link.get_text(strip=True)[:50]}")
             return candidates
             
-        for row in candidate_rows:
+        logger.info(f"Processing {len(candidate_rows)} candidate rows")
+        for i, row in enumerate(candidate_rows):
             try:
                 candidate = self.extract_candidate_from_row(row)
                 if candidate:
                     candidates.append(candidate)
+                    logger.debug(f"Extracted candidate {i+1}: {candidate.get('candidate_id', 'unknown')} - {candidate.get('name', 'unknown')}")
+                else:
+                    logger.debug(f"Failed to extract candidate from row {i+1}")
             except Exception as e:
-                logger.error(f"Error parsing candidate row: {e}")
+                logger.error(f"Error parsing candidate row {i+1}: {e}")
                 
+        logger.info(f"Successfully extracted {len(candidates)} candidates")
         return candidates
         
     def extract_candidate_from_row(self, row) -> Optional[Dict[str, str]]:

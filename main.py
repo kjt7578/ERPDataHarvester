@@ -125,61 +125,114 @@ class ERPResumeHarvester:
             return False
             
     def harvest_candidates(self, start_page: int = 1, 
-                          specific_id: Optional[str] = None) -> bool:
+                          specific_id: Optional[str] = None,
+                          id_range: Optional[str] = None) -> bool:
         """
-        Main harvesting process
+        Harvest candidates from ERP system
         
         Args:
-            start_page: Page number to start from
-            specific_id: Specific candidate ID to process (optional)
+            start_page: Starting page number for full harvest
+            specific_id: Process only this specific candidate ID
+            id_range: Process range of IDs (format: "65585-65580" or "65580,65581,65582")
             
         Returns:
-            True if successful
+            True if successful, False otherwise
         """
-        if not self.initialize():
-            return False
-            
-        self.stats['start_time'] = datetime.now()
-        
         try:
-            if specific_id:
-                # Process specific candidate
-                logging.info(f"Processing specific candidate: {specific_id}")
-                return self._process_specific_candidate(specific_id)
-            else:
-                # Process all candidates
-                logging.info("Starting full harvest process...")
-                return self._process_all_candidates(start_page)
+            if not self.initialize():
+                return False
                 
-        except Exception as e:
-            logging.error(f"Harvest error: {e}")
-            return False
-        finally:
+            self.stats['start_time'] = datetime.now()
+            
+            if specific_id:
+                logging.info(f"Processing specific candidate: {specific_id}")
+                success = self._process_specific_candidate(specific_id) is not None
+            elif id_range:
+                logging.info(f"Processing ID range: {id_range}")
+                success = self._process_id_range(id_range)
+            else:
+                logging.info("Starting full harvest process...")
+                success = self._process_all_candidates(start_page)
+                
             self.stats['end_time'] = datetime.now()
             self._print_summary()
+            
+            return success
+            
+        except KeyboardInterrupt:
+            logging.info("Harvest interrupted by user")
+            return False
+        except Exception as e:
+            logging.error(f"Error during harvest: {e}")
+            return False
+        finally:
             self.cleanup()
             
     def _process_all_candidates(self, start_page: int) -> bool:
-        """Process all candidates from list pages"""
+        """Process all candidates from multiple pages"""
         all_candidates = []
         page = start_page
         
+        # Try different possible list URLs for HRcap ERP
+        list_url_patterns = [
+            f"{config.erp_base_url}/searchcandidate/dispSearchList/{{page}}",
+            f"{config.erp_base_url}/candidate/list/{{page}}",
+            f"{config.erp_base_url}/case/dispList?page={{page}}",
+            f"{config.erp_base_url}/member/list?page={{page}}",
+        ]
+        
+        successful_pattern = None
+        
         while True:
-            # Construct list page URL for HRcap ERP system
-            list_url = f"{config.erp_base_url}/searchcandidate/dispSearchList/{page}"
-            logging.info(f"Processing page {page}: {list_url}")
+            candidates_found_this_page = False
             
-            # Get page content
-            try:
-                response = self.session.get(list_url)
-                html = response.text if hasattr(response, 'text') else str(response)
-            except Exception as e:
-                logging.error(f"Error fetching page {page}: {e}")
-                break
+            # Try each URL pattern if we haven't found a working one
+            if not successful_pattern:
+                for pattern in list_url_patterns:
+                    list_url = pattern.format(page=page)
+                    logging.info(f"Trying URL pattern: {list_url}")
+                    
+                    try:
+                        response = self.session.get(list_url)
+                        html = response.text if hasattr(response, 'text') else str(response)
+                        
+                        # Quick check if this looks like a candidate list page
+                        if len(html) > 1000 and ('candidate' in html.lower() or 'table' in html.lower()):
+                            candidates = self.scraper.parse_candidate_list(html)
+                            if candidates:
+                                logging.info(f"Found working URL pattern: {pattern}")
+                                successful_pattern = pattern
+                                candidates_found_this_page = True
+                                break
+                        else:
+                            logging.debug(f"URL {list_url} doesn't look like candidate list (length: {len(html)})")
+                            
+                    except Exception as e:
+                        logging.debug(f"Error with URL {list_url}: {e}")
+                        continue
+                        
+                if not successful_pattern:
+                    logging.error("No working URL pattern found for candidate list")
+                    break
+            else:
+                # Use the successful pattern
+                list_url = successful_pattern.format(page=page)
+                logging.info(f"Processing page {page}: {list_url}")
                 
-            # Parse candidate list
-            candidates = self.scraper.parse_candidate_list(html)
-            if not candidates:
+                try:
+                    response = self.session.get(list_url)
+                    html = response.text if hasattr(response, 'text') else str(response)
+                    
+                    candidates = self.scraper.parse_candidate_list(html)
+                    if candidates:
+                        candidates_found_this_page = True
+                    
+                except Exception as e:
+                    logging.error(f"Error fetching page {page}: {e}")
+                    break
+            
+            # If no candidates found on this page, we're done
+            if not candidates_found_this_page:
                 logging.info("No more candidates found")
                 break
                 
@@ -213,7 +266,7 @@ class ERPResumeHarvester:
         
         return True
         
-    def _process_specific_candidate(self, candidate_id: str) -> bool:
+    def _process_specific_candidate(self, candidate_id: str, save_individual: bool = True) -> Optional[Dict[str, Any]]:
         """Process a specific candidate by ID"""
         # Construct detail URL for HRcap ERP system
         detail_url = f"{config.erp_base_url}/candidate/dispView/{candidate_id}?kw="
@@ -225,11 +278,12 @@ class ERPResumeHarvester:
         
         candidate_info = self._process_candidate(candidate_basic)
         if candidate_info:
-            # Save individual result
-            self.metadata_saver.save_consolidated_results([candidate_info])
-            return True
+            # Save individual result only if requested
+            if save_individual:
+                self.metadata_saver.save_consolidated_results([candidate_info])
+            return candidate_info
             
-        return False
+        return None
         
     def _process_candidate(self, candidate_basic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -330,6 +384,85 @@ class ERPResumeHarvester:
         if self.session:
             self.session.close()
 
+    def _process_id_range(self, id_range: str) -> bool:
+        """
+        Process a range of candidate IDs
+        
+        Args:
+            id_range: Range specification like "65585-65580" or "65580,65581,65582"
+            
+        Returns:
+            True if at least one candidate was processed successfully
+        """
+        candidate_ids = []
+        
+        # Parse different range formats
+        if '-' in id_range:
+            # Range format: "65585-65580" (from high to low)
+            try:
+                parts = id_range.split('-')
+                if len(parts) == 2:
+                    start_id = int(parts[0])
+                    end_id = int(parts[1])
+                    
+                    # Ensure we go from high to low or low to high
+                    if start_id > end_id:
+                        candidate_ids = list(range(start_id, end_id - 1, -1))  # Descending
+                    else:
+                        candidate_ids = list(range(start_id, end_id + 1))  # Ascending
+                else:
+                    raise ValueError("Invalid range format")
+            except ValueError:
+                logging.error(f"Invalid range format: {id_range}. Use format like '65585-65580'")
+                return False
+                
+        elif ',' in id_range:
+            # Comma-separated format: "65580,65581,65582"
+            try:
+                candidate_ids = [int(id_str.strip()) for id_str in id_range.split(',')]
+            except ValueError:
+                logging.error(f"Invalid comma-separated format: {id_range}")
+                return False
+        else:
+            logging.error(f"Invalid ID range format: {id_range}. Use '65585-65580' or '65580,65581,65582'")
+            return False
+            
+        if not candidate_ids:
+            logging.error("No candidate IDs generated from range")
+            return False
+            
+        logging.info(f"Processing {len(candidate_ids)} candidates: {candidate_ids[0]} to {candidate_ids[-1]}")
+        
+        all_candidates = []
+        successful_count = 0
+        
+        for i, candidate_id in enumerate(candidate_ids, 1):
+            logging.info(f"Processing candidate {i}/{len(candidate_ids)}: {candidate_id}")
+            
+            candidate_info = self._process_specific_candidate(str(candidate_id), save_individual=False)
+            if candidate_info:
+                all_candidates.append(candidate_info)
+                successful_count += 1
+                logging.info(f"✅ Successfully processed {candidate_id}")
+            else:
+                logging.warning(f"❌ Failed to process {candidate_id}")
+                
+            # Add delay between requests to be respectful to server
+            if i < len(candidate_ids):  # Don't delay after last item
+                time.sleep(config.request_delay)
+                
+        # Save consolidated results
+        if all_candidates:
+            logging.info(f"Saving consolidated results for {len(all_candidates)} candidates")
+            self.metadata_saver.save_consolidated_results(all_candidates)
+            
+        # Generate report
+        download_stats = self.downloader.get_statistics()
+        self.metadata_saver.generate_download_report(download_stats)
+        
+        logging.info(f"ID range processing complete: {successful_count}/{len(candidate_ids)} successful")
+        return successful_count > 0
+
 
 def main():
     """Main entry point"""
@@ -351,6 +484,11 @@ def main():
         help='Process specific candidate ID'
     )
     parser.add_argument(
+        '--range',
+        type=str,
+        help='Process range of IDs (format: "65585-65580" or "65580,65581,65582")'
+    )
+    parser.add_argument(
         '--log-level',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
         default='INFO',
@@ -366,7 +504,8 @@ def main():
     harvester = ERPResumeHarvester(use_selenium=args.selenium)
     success = harvester.harvest_candidates(
         start_page=args.page,
-        specific_id=args.id
+        specific_id=args.id,
+        id_range=args.range
     )
     
     sys.exit(0 if success else 1)

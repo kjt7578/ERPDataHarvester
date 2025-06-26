@@ -239,35 +239,85 @@ class ERPSession:
             logger.info(f"Navigating to HRcap login page: {login_url}")
             self.driver.get(login_url)
             
-            # Wait for login form to load
+            # Wait for page to fully load
             wait = WebDriverWait(self.driver, 10)
+            time.sleep(2)  # Additional wait for dynamic content
             
-            # Find and fill ID field (HRcap uses 'ID' field)
-            try:
-                username_field = wait.until(
-                    EC.presence_of_element_located((By.NAME, "ID"))
-                )
-                logger.info("Found ID field")
-            except TimeoutException:
-                # Fallback to other possible field names
+            logger.info("Analyzing page structure...")
+            
+            # Find all input elements to understand the form structure
+            all_inputs = self.driver.find_elements(By.TAG_NAME, "input")
+            logger.info(f"Found {len(all_inputs)} input elements:")
+            
+            for i, inp in enumerate(all_inputs):
                 try:
-                    username_field = self.driver.find_element(By.NAME, "username")
-                    logger.info("Found username field")
-                except NoSuchElementException:
-                    username_field = self.driver.find_element(By.NAME, "loginid")
-                    logger.info("Found loginid field")
+                    name = inp.get_attribute("name") or "no-name"
+                    input_type = inp.get_attribute("type") or "text"
+                    placeholder = inp.get_attribute("placeholder") or ""
+                    input_id = inp.get_attribute("id") or ""
+                    logger.info(f"  Input {i+1}: name='{name}', type='{input_type}', id='{input_id}', placeholder='{placeholder}'")
+                except:
+                    continue
             
+            # Try to find username field with multiple strategies
+            username_field = None
+            username_strategies = [
+                (By.NAME, "ID"),
+                (By.NAME, "id"),
+                (By.NAME, "username"),
+                (By.NAME, "loginid"),
+                (By.ID, "ID"),
+                (By.ID, "id"),
+                (By.ID, "username"),
+                (By.CSS_SELECTOR, "input[placeholder*='ID' i]"),
+                (By.CSS_SELECTOR, "input[placeholder*='아이디' i]"),
+                (By.XPATH, "//input[@type='text'][1]"),  # First text input
+            ]
+            
+            for strategy in username_strategies:
+                try:
+                    username_field = self.driver.find_element(*strategy)
+                    logger.info(f"Found username field using: {strategy}")
+                    break
+                except NoSuchElementException:
+                    continue
+            
+            if not username_field:
+                logger.error("Could not find username field with any strategy")
+                return False
+            
+            # Try to find password field with multiple strategies
+            password_field = None
+            password_strategies = [
+                (By.NAME, "PW"),
+                (By.NAME, "pw"),
+                (By.NAME, "password"),
+                (By.NAME, "passwd"),
+                (By.ID, "PW"),
+                (By.ID, "pw"),
+                (By.ID, "password"),
+                (By.CSS_SELECTOR, "input[type='password']"),
+                (By.CSS_SELECTOR, "input[placeholder*='PW' i]"),
+                (By.CSS_SELECTOR, "input[placeholder*='비밀번호' i]"),
+                (By.XPATH, "//input[@type='password'][1]"),  # First password input
+            ]
+            
+            for strategy in password_strategies:
+                try:
+                    password_field = self.driver.find_element(*strategy)
+                    logger.info(f"Found password field using: {strategy}")
+                    break
+                except NoSuchElementException:
+                    continue
+            
+            if not password_field:
+                logger.error("Could not find password field with any strategy")
+                return False
+            
+            # Fill in the credentials
             username_field.clear()
             username_field.send_keys(self.username)
             logger.info(f"Entered username: {self.username}")
-            
-            # Find and fill PW field (HRcap uses 'PW' field)
-            try:
-                password_field = self.driver.find_element(By.NAME, "PW")
-                logger.info("Found PW field")
-            except NoSuchElementException:
-                password_field = self.driver.find_element(By.NAME, "password")
-                logger.info("Found password field")
             
             password_field.clear()
             password_field.send_keys(self.password)
@@ -276,35 +326,37 @@ class ERPSession:
             # Wait a moment for any JavaScript to load
             time.sleep(1)
             
-            # Submit form - look for LOGIN button or submit
-            try:
-                submit_button = self.driver.find_element(By.XPATH, "//input[@value='LOGIN']")
-                logger.info("Found LOGIN input button")
-            except NoSuchElementException:
+            # Find submit button with multiple strategies
+            submit_button = None
+            submit_strategies = [
+                (By.XPATH, "//input[@value='LOGIN']"),
+                (By.XPATH, "//input[@value='로그인']"),
+                (By.XPATH, "//button[contains(text(), 'LOGIN')]"),
+                (By.XPATH, "//button[contains(text(), '로그인')]"),
+                (By.CSS_SELECTOR, "button[type='submit']"),
+                (By.CSS_SELECTOR, "input[type='submit']"),
+                (By.TAG_NAME, "button"),  # Any button
+            ]
+            
+            for strategy in submit_strategies:
                 try:
-                    submit_button = self.driver.find_element(
-                        By.CSS_SELECTOR, 
-                        "button[type='submit'], input[type='submit']"
-                    )
-                    logger.info("Found submit button")
+                    submit_button = self.driver.find_element(*strategy)
+                    logger.info(f"Found submit button using: {strategy}")
+                    break
                 except NoSuchElementException:
-                    try:
-                        # Look for any button with LOGIN text
-                        submit_button = self.driver.find_element(By.XPATH, "//*[contains(text(), 'LOGIN') or contains(text(), '로그인')]")
-                        logger.info("Found button with LOGIN text")
-                    except NoSuchElementException:
-                        # Last resort - try clicking Enter on password field
-                        logger.warning("No submit button found, trying Enter key")
-                        password_field.send_keys(Keys.RETURN)
-                        submit_button = None
+                    continue
             
             if submit_button:
                 submit_button.click()
                 logger.info("Clicked login button")
+            else:
+                # Last resort - try Enter key
+                logger.warning("No submit button found, trying Enter key")
+                password_field.send_keys(Keys.RETURN)
             
             # Wait for AJAX response or redirect
             logger.info("Waiting for login response...")
-            time.sleep(3)
+            time.sleep(5)  # Longer wait for AJAX
             
             # Check current URL and page content
             current_url = self.driver.current_url
