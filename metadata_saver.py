@@ -46,6 +46,54 @@ class MetadataSaver:
         self.cases_json_path = self.results_dir / "cases.json"
         self.cases_csv_path = self.results_dir / "cases.csv"
         
+        # Initialize error tracking
+        self.processing_errors = []
+        self.warnings = []
+        
+    def record_error(self, candidate_id: str, name: str, detail_url: str, error_type: str, error_message: str):
+        """
+        Record a processing error for later reporting
+        
+        Args:
+            candidate_id: Candidate ID
+            name: Candidate name
+            detail_url: Detail page URL
+            error_type: Type of error (e.g., 'DOWNLOAD_FAILED', 'PARSE_ERROR', 'CONNECTION_ERROR')
+            error_message: Detailed error message
+        """
+        error_record = {
+            'candidate_id': candidate_id,
+            'name': name,
+            'detail_url': detail_url,
+            'error_type': error_type,
+            'error_message': error_message,
+            'timestamp': datetime.now().isoformat()
+        }
+        self.processing_errors.append(error_record)
+        logger.error(f"Recorded error for {name} ({candidate_id}): {error_type} - {error_message}")
+        
+    def record_warning(self, candidate_id: str, name: str, detail_url: str, warning_type: str, warning_message: str):
+        """
+        Record a processing warning for later reporting
+        
+        Args:
+            candidate_id: Candidate ID
+            name: Candidate name
+            detail_url: Detail page URL
+            warning_type: Type of warning (e.g., 'MISSING_DATA', 'DATE_EXTRACTION_FAILED', 'NO_RESUME_URL')
+            warning_message: Detailed warning message
+        """
+        warning_record = {
+            'candidate_id': candidate_id,
+            'name': name,
+            'detail_url': detail_url,
+            'warning_type': warning_type,
+            'warning_message': warning_message,
+            'timestamp': datetime.now().isoformat()
+        }
+        self.warnings.append(warning_record)
+        logger.warning(f"Recorded warning for {name} ({candidate_id}): {warning_type} - {warning_message}")
+        
     def save_candidate_metadata(self, candidate_info: Dict[str, Any], 
                                pdf_path: Optional[Path] = None) -> bool:
         """
@@ -519,7 +567,7 @@ class MetadataSaver:
         
     def generate_download_report(self, download_stats: Dict[str, Any]) -> Path:
         """
-        Generate a download report
+        Generate a comprehensive download and processing report
         
         Args:
             download_stats: Download statistics from PDFDownloader
@@ -527,76 +575,138 @@ class MetadataSaver:
         Returns:
             Path to report file
         """
-        report_path = self.results_dir / f'download_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+        report_path = self.results_dir / f'processing_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
         
         try:
             with open(report_path, 'w', encoding='utf-8') as f:
-                f.write("ERP Resume Download Report\n")
-                f.write("=" * 50 + "\n\n")
+                f.write("ERP Resume Processing Report\n")
+                f.write("=" * 60 + "\n\n")
                 f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 
-                f.write("Download Statistics:\n")
+                # Processing Statistics Summary
+                f.write("Processing Statistics:\n")
                 f.write("-" * 30 + "\n")
-                f.write(f"Total candidates: {download_stats.get('total', 0)}\n")
+                f.write(f"Total candidates processed: {download_stats.get('total', 0)}\n")
                 f.write(f"Successful downloads: {download_stats.get('successful', 0)}\n")
                 f.write(f"Failed downloads: {download_stats.get('failed', 0)}\n")
                 f.write(f"Skipped (existing): {download_stats.get('skipped', 0)}\n")
+                f.write(f"Processing errors: {len(self.processing_errors)}\n")
+                f.write(f"Warnings: {len(self.warnings)}\n")
                 f.write(f"Success rate: {download_stats.get('success_rate', 0):.1f}%\n")
-                f.write(f"Total size: {download_stats.get('total_size_mb', 0):.2f} MB\n")
+                f.write(f"Total size downloaded: {download_stats.get('total_size_mb', 0):.2f} MB\n\n")
                 
-                # Add successfully downloaded candidates list
+                # Processing Errors Section
+                if self.processing_errors:
+                    f.write("🚨 PROCESSING ERRORS:\n")
+                    f.write("=" * 50 + "\n")
+                    for i, error in enumerate(self.processing_errors, 1):
+                        f.write(f"{i:3d}. ERROR: {error['error_type']}\n")
+                        f.write(f"     Candidate ID: {error['candidate_id']}\n")
+                        f.write(f"     Name: {error['name']}\n")
+                        f.write(f"     Detail URL: {error['detail_url']}\n")
+                        f.write(f"     Error Message: {error['error_message']}\n")
+                        f.write(f"     Timestamp: {error['timestamp']}\n")
+                        f.write("-" * 50 + "\n")
+                    f.write("\n")
+                
+                # Warnings Section
+                if self.warnings:
+                    f.write("⚠️  WARNINGS:\n")
+                    f.write("=" * 50 + "\n")
+                    for i, warning in enumerate(self.warnings, 1):
+                        f.write(f"{i:3d}. WARNING: {warning['warning_type']}\n")
+                        f.write(f"     Candidate ID: {warning['candidate_id']}\n")
+                        f.write(f"     Name: {warning['name']}\n")
+                        f.write(f"     Detail URL: {warning['detail_url']}\n")
+                        f.write(f"     Warning Message: {warning['warning_message']}\n")
+                        f.write(f"     Timestamp: {warning['timestamp']}\n")
+                        f.write("-" * 50 + "\n")
+                    f.write("\n")
+                
+                # Successfully Downloaded Candidates
                 successful_list = download_stats.get('successful_candidates', [])
                 if successful_list:
-                    f.write("\n\nSuccessfully Downloaded Candidates:\n")
+                    f.write("✅ Successfully Downloaded Candidates:\n")
                     f.write("-" * 40 + "\n")
                     for i, candidate in enumerate(successful_list, 1):
                         candidate_id = candidate.get('candidate_id', 'N/A')
                         name = candidate.get('name', 'Unknown')
                         size_mb = candidate.get('file_size_mb', 0)
                         f.write(f"{i:3d}. ID: {candidate_id} | {name} | {size_mb:.2f} MB\n")
+                    f.write("\n")
                 
-                # Add skipped candidates list
+                # Skipped Candidates
                 skipped_list = download_stats.get('skipped_candidates', [])
                 if skipped_list:
-                    f.write("\n\nSkipped Candidates (Already Downloaded):\n")
+                    f.write("⏭️  Skipped Candidates (Already Downloaded):\n")
                     f.write("-" * 40 + "\n")
                     for i, candidate in enumerate(skipped_list, 1):
                         candidate_id = candidate.get('candidate_id', 'N/A')
                         name = candidate.get('name', 'Unknown')
                         f.write(f"{i:3d}. ID: {candidate_id} | {name}\n")
+                    f.write("\n")
                 
-                # Add failed candidates if available
+                # Failed Downloads from Downloader
                 failed_list = download_stats.get('failed_candidates', [])
                 if failed_list:
-                    f.write("\n\nFailed Downloads:\n")
-                    f.write("-" * 40 + "\n")
+                    f.write("❌ Failed Downloads (Downloader Issues):\n")
+                    f.write("-" * 45 + "\n")
                     for i, candidate in enumerate(failed_list, 1):
                         candidate_id = candidate.get('candidate_id', 'N/A')
                         name = candidate.get('name', 'Unknown')
                         error = candidate.get('error', 'Unknown error')
-                        f.write(f"{i:3d}. ID: {candidate_id} | {name} | Error: {error}\n")
+                        detail_url = candidate.get('detail_url', 'N/A')
+                        f.write(f"{i:3d}. ID: {candidate_id} | {name}\n")
+                        f.write(f"     URL: {detail_url}\n")
+                        f.write(f"     Error: {error}\n")
+                        f.write("-" * 45 + "\n")
+                    f.write("\n")
                 
-                # Add summary by Candidate ID only
+                # Summary of All Processed IDs
                 all_candidate_ids = []
                 all_candidate_ids.extend([c.get('candidate_id') for c in successful_list if c.get('candidate_id')])
                 all_candidate_ids.extend([c.get('candidate_id') for c in skipped_list if c.get('candidate_id')])
                 all_candidate_ids.extend([c.get('candidate_id') for c in failed_list if c.get('candidate_id')])
+                all_candidate_ids.extend([e.get('candidate_id') for e in self.processing_errors if e.get('candidate_id')])
                 
-                if all_candidate_ids:
-                    f.write(f"\n\nAll Processed Candidate IDs ({len(all_candidate_ids)} total):\n")
+                # Remove duplicates while preserving order
+                unique_ids = []
+                seen = set()
+                for id in all_candidate_ids:
+                    if id and id not in seen:
+                        unique_ids.append(id)
+                        seen.add(id)
+                
+                if unique_ids:
+                    f.write(f"📋 All Processed Candidate IDs ({len(unique_ids)} total):\n")
                     f.write("-" * 40 + "\n")
                     # Sort IDs numerically if possible
                     try:
-                        sorted_ids = sorted(all_candidate_ids, key=lambda x: int(x) if x.isdigit() else float('inf'))
+                        sorted_ids = sorted(unique_ids, key=lambda x: int(x) if x.isdigit() else float('inf'))
                     except:
-                        sorted_ids = sorted(all_candidate_ids)
+                        sorted_ids = sorted(unique_ids)
                     
                     # Print IDs in rows of 10
                     for i in range(0, len(sorted_ids), 10):
                         row_ids = sorted_ids[i:i+10]
                         f.write(", ".join(row_ids) + "\n")
+                
+                # Add recommendations if there are issues
+                if self.processing_errors or self.warnings or failed_list:
+                    f.write("\n\n💡 RECOMMENDATIONS:\n")
+                    f.write("-" * 30 + "\n")
+                    if self.processing_errors:
+                        f.write("• Review processing errors above for systematic issues\n")
+                        f.write("• Check network connectivity for connection errors\n")
+                        f.write("• Verify ERP credentials for authentication errors\n")
+                    if self.warnings:
+                        f.write("• Review warnings for data quality issues\n")
+                        f.write("• Consider updating scraping logic for missing data\n")
+                    if failed_list:
+                        f.write("• Retry failed downloads with increased timeout\n")
+                        f.write("• Check file format compatibility\n")
                         
-            logger.info(f"Generated download report: {report_path}")
+            logger.info(f"Generated comprehensive processing report: {report_path}")
             return report_path
             
         except Exception as e:

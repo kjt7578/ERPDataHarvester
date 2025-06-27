@@ -297,8 +297,16 @@ class ERPResumeHarvester:
         """
         candidate_id = candidate_basic.get('candidate_id')
         detail_url = candidate_basic.get('detail_url')
+        candidate_name = candidate_basic.get('name', 'Unknown')
         
         if not candidate_id or not detail_url:
+            self.metadata_saver.record_error(
+                candidate_id or "Unknown", 
+                candidate_name, 
+                detail_url or "N/A",
+                "MISSING_DATA", 
+                "Missing candidate ID or detail URL from basic info"
+            )
             logging.warning("Missing candidate ID or detail URL")
             return None
             
@@ -308,33 +316,115 @@ class ERPResumeHarvester:
             
             # Get detail page
             logging.info(f"Processing candidate {candidate_id}")
-            response = self.session.get(detail_url)
-            html = response.text if hasattr(response, 'text') else str(response)
+            
+            try:
+                response = self.session.get(detail_url)
+                html = response.text if hasattr(response, 'text') else str(response)
+            except Exception as e:
+                self.metadata_saver.record_error(
+                    candidate_id, candidate_name, detail_url,
+                    "CONNECTION_ERROR", 
+                    f"Failed to fetch detail page: {str(e)}"
+                )
+                raise
             
             # Get raw HTML without JavaScript for accurate date extraction
-            raw_response = self.session.get_raw_html(detail_url)
-            raw_html = raw_response.text if hasattr(raw_response, 'text') else str(raw_response)
+            try:
+                raw_response = self.session.get_raw_html(detail_url)
+                raw_html = raw_response.text if hasattr(raw_response, 'text') else str(raw_response)
+            except Exception as e:
+                self.metadata_saver.record_warning(
+                    candidate_id, candidate_name, detail_url,
+                    "RAW_HTML_FAILED", 
+                    f"Failed to get raw HTML, using rendered HTML only: {str(e)}"
+                )
+                raw_html = None
             
             # Parse complete candidate info with both HTML versions
-            candidate_info = self.scraper.parse_candidate_detail(html, candidate_id, raw_html, detail_url)
+            try:
+                candidate_info = self.scraper.parse_candidate_detail(html, candidate_id, raw_html, detail_url)
+                
+                # Update candidate name if we got it from parsing
+                if candidate_info.name and candidate_info.name != 'Unknown':
+                    candidate_name = candidate_info.name
+                    
+            except Exception as e:
+                self.metadata_saver.record_error(
+                    candidate_id, candidate_name, detail_url,
+                    "PARSE_ERROR", 
+                    f"Failed to parse candidate detail page: {str(e)}"
+                )
+                raise
+            
+            # Check for missing critical data and record warnings
+            if not candidate_info.name or candidate_info.name == 'Unknown':
+                self.metadata_saver.record_warning(
+                    candidate_id, candidate_name, detail_url,
+                    "MISSING_NAME", 
+                    "Candidate name could not be extracted"
+                )
+                
+            if not candidate_info.created_date:
+                self.metadata_saver.record_warning(
+                    candidate_id, candidate_name, detail_url,
+                    "MISSING_CREATED_DATE", 
+                    "Created date could not be extracted"
+                )
+                
+            if not candidate_info.resume_url:
+                self.metadata_saver.record_warning(
+                    candidate_id, candidate_name, detail_url,
+                    "NO_RESUME_URL", 
+                    "No resume download URL found"
+                )
             
             # Download resume if URL available
             pdf_path = None
             if candidate_info.resume_url:
-                pdf_path = self._download_candidate_resume(candidate_info)
+                try:
+                    pdf_path = self._download_candidate_resume(candidate_info)
+                    if not pdf_path:
+                        self.metadata_saver.record_error(
+                            candidate_id, candidate_name, detail_url,
+                            "DOWNLOAD_FAILED", 
+                            "Resume download failed - check downloader logs for details"
+                        )
+                except Exception as e:
+                    self.metadata_saver.record_error(
+                        candidate_id, candidate_name, detail_url,
+                        "DOWNLOAD_ERROR", 
+                        f"Resume download error: {str(e)}"
+                    )
             else:
                 logging.warning(f"No resume URL found for candidate {candidate_id}")
                 
             # Save metadata
-            self.metadata_saver.save_candidate_metadata(
-                candidate_info.to_dict(), 
-                pdf_path
-            )
+            try:
+                self.metadata_saver.save_candidate_metadata(
+                    candidate_info.to_dict(), 
+                    pdf_path
+                )
+            except Exception as e:
+                self.metadata_saver.record_error(
+                    candidate_id, candidate_name, detail_url,
+                    "METADATA_SAVE_ERROR", 
+                    f"Failed to save candidate metadata: {str(e)}"
+                )
+                # Don't raise here - we still want to return the candidate info
+                logging.error(f"Failed to save metadata for {candidate_id}: {e}")
             
             return candidate_info.to_dict()
             
         except Exception as e:
             logging.error(f"Error processing candidate {candidate_id}: {e}")
+            # If we haven't already recorded this error, record it as a general processing error
+            if not any(error['candidate_id'] == candidate_id and 'processing candidate' in error['error_message'].lower() 
+                      for error in self.metadata_saver.processing_errors):
+                self.metadata_saver.record_error(
+                    candidate_id, candidate_name, detail_url,
+                    "PROCESSING_ERROR", 
+                    f"General processing error: {str(e)}"
+                )
             return None
             
     def _download_candidate_resume(self, candidate_info: CandidateInfo) -> Optional[Path]:
