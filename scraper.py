@@ -316,7 +316,7 @@ class ERPScraper:
                     
         return candidate
         
-    def parse_candidate_detail(self, html: str, candidate_id: str, raw_html: Optional[str] = None) -> CandidateInfo:
+    def parse_candidate_detail(self, html: str, candidate_id: str, raw_html: Optional[str] = None, detail_url: Optional[str] = None) -> CandidateInfo:
         """
         Parse HRcap ERP candidate detail page to extract complete information
         
@@ -336,6 +336,7 @@ class ERPScraper:
             'name': 'Unknown',
             'created_date': datetime.now().strftime('%Y-%m-%d'),
             'updated_date': datetime.now().strftime('%Y-%m-%d'),
+            'detail_url': detail_url,  # Add detail URL to info
         }
         
         # Extract REAL candidate ID from HTML (multiple methods)
