@@ -316,7 +316,7 @@ class ERPScraper:
                     
         return candidate
         
-    def parse_candidate_detail(self, html: str, candidate_id: str) -> CandidateInfo:
+    def parse_candidate_detail(self, html: str, candidate_id: str, raw_html: Optional[str] = None) -> CandidateInfo:
         """
         Parse HRcap ERP candidate detail page to extract complete information
         
@@ -483,14 +483,46 @@ class ERPScraper:
         if info['name'] == 'Unknown':
             logger.warning(f"Could not extract name for candidate {info['candidate_id']}, page might be empty or have different structure")
         
-        # Extract dates from Profile Status section
-        created_date = self._extract_hrcap_date(soup, 'Created')
+        # Extract dates from Profile Status section using raw HTML if available
+        raw_soup = BeautifulSoup(raw_html, 'html.parser') if raw_html else soup
+        
+        # Debug: log raw HTML content for date extraction
+        if raw_html:
+            logger.debug(f"Raw HTML available: {len(raw_html)} characters")
+            # Find and log date-related content in raw HTML
+            raw_date_elements = raw_soup.find_all('td')
+            for td in raw_date_elements:
+                text = td.get_text(strip=True)
+                if 'Created' in text or 'Last Updated' in text:
+                    logger.debug(f"Raw HTML date element: {text}")
+        else:
+            logger.debug("No raw HTML available, using rendered HTML")
+        
+        created_date = self._extract_hrcap_date(raw_soup, 'Created')
         if created_date:
             info['created_date'] = created_date
+            logger.info(f"✅ Extracted created date from raw HTML: {created_date}")
+        else:
+            # Fallback to rendered HTML
+            created_date = self._extract_hrcap_date(soup, 'Created')
+            if created_date:
+                info['created_date'] = created_date
+                logger.warning(f"⚠️ Used rendered HTML for created date: {created_date}")
+            else:
+                logger.error(f"❌ Failed to extract created date from both raw and rendered HTML")
             
-        updated_date = self._extract_hrcap_date(soup, 'Last Updated')
+        updated_date = self._extract_hrcap_date(raw_soup, 'Last Updated')
         if updated_date:
             info['updated_date'] = updated_date
+            logger.info(f"✅ Extracted updated date from raw HTML: {updated_date}")
+        else:
+            # Fallback to rendered HTML
+            updated_date = self._extract_hrcap_date(soup, 'Last Updated')
+            if updated_date:
+                info['updated_date'] = updated_date
+                logger.warning(f"⚠️ Used rendered HTML for updated date: {updated_date}")
+            else:
+                logger.error(f"❌ Failed to extract updated date from both raw and rendered HTML")
             
         # Extract contact information from Contact Information table
         contact_info = self._extract_hrcap_contact_info(soup)
@@ -519,17 +551,19 @@ class ERPScraper:
             Date string in YYYY-MM-DD format or None
         """
         try:
-            # Find td containing the label
+            # Find td containing the label (both with and without space)
             td_elements = soup.find_all('td')
             for td in td_elements:
                 text = td.get_text(strip=True)
-                if f'{label} :' in text:
-                    # Extract date from format "Created : 06/12/2025"
+                # Check for both formats: "Created : 06/12/2025" and "Created: 06/12/2025"
+                if f'{label}:' in text or f'{label} :' in text:
+                    # Extract date from format "Created : 06/12/2025" or "Created: 06/12/2025"
                     date_match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
                     if date_match:
                         date_str = date_match.group(1)
                         # Convert MM/DD/YYYY to YYYY-MM-DD
                         month, day, year = date_str.split('/')
+                        logger.debug(f"Date conversion: {date_str} -> {year}-{month}-{day}")
                         return f"{year}-{month}-{day}"
         except Exception as e:
             logger.error(f"Error extracting {label} date: {e}")

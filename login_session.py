@@ -457,6 +457,24 @@ class ERPSession:
         else:
             return self.session.get(url, **kwargs)
             
+    def get_raw_html(self, url: str, **kwargs) -> requests.Response:
+        """Make GET request to get raw HTML without JavaScript execution"""
+        if not self.refresh_session():
+            raise Exception("Failed to refresh session")
+            
+        if self.use_selenium:
+            # Even with Selenium, use requests with cookies for raw HTML
+            cookies = self.driver.get_cookies()
+            session = self.create_requests_session()
+            
+            # Transfer cookies from Selenium
+            for cookie in cookies:
+                session.cookies.set(cookie['name'], cookie['value'])
+                
+            return session.get(url, **kwargs)
+        else:
+            return self.session.get(url, **kwargs)
+            
     def post(self, url: str, **kwargs) -> requests.Response:
         """Make POST request with session"""
         if not self.refresh_session():

@@ -311,8 +311,12 @@ class ERPResumeHarvester:
             response = self.session.get(detail_url)
             html = response.text if hasattr(response, 'text') else str(response)
             
-            # Parse complete candidate info
-            candidate_info = self.scraper.parse_candidate_detail(html, candidate_id)
+            # Get raw HTML without JavaScript for accurate date extraction
+            raw_response = self.session.get_raw_html(detail_url)
+            raw_html = raw_response.text if hasattr(raw_response, 'text') else str(raw_response)
+            
+            # Parse complete candidate info with both HTML versions
+            candidate_info = self.scraper.parse_candidate_detail(html, candidate_id, raw_html)
             
             # Download resume if URL available
             pdf_path = None
