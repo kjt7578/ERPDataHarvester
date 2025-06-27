@@ -471,32 +471,80 @@ class ERPSession:
         """Download file using session"""
         try:
             if not self.refresh_session():
+                logger.error("Failed to refresh session before download")
                 return False
+                
+            logger.debug(f"Attempting to download from: {url}")
+            logger.debug(f"Save path: {save_path}")
+            logger.debug(f"Using Selenium: {self.use_selenium}")
                 
             if self.use_selenium:
                 # For Selenium, use requests with cookies from driver
                 cookies = self.driver.get_cookies()
                 session = self.create_requests_session()
                 
+                logger.debug(f"Transferring {len(cookies)} cookies from Selenium")
+                
                 # Transfer cookies
                 for cookie in cookies:
                     session.cookies.set(cookie['name'], cookie['value'])
+                    logger.debug(f"Cookie: {cookie['name']} = {cookie['value'][:20]}...")
                     
                 response = session.get(url, stream=True, **kwargs)
             else:
                 response = self.session.get(url, stream=True, **kwargs)
                 
+            logger.debug(f"Download response status: {response.status_code}")
+            logger.debug(f"Content-Type: {response.headers.get('Content-Type', 'Unknown')}")
+            logger.debug(f"Content-Length: {response.headers.get('Content-Length', 'Unknown')}")
+            logger.debug(f"Response URL: {response.url}")
+                
             if response.status_code == 200:
+                # Check first few bytes to see if it's HTML
+                content_peek = b''
+                content_written = 0
+                
                 with open(save_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                        if chunk:
+                            f.write(chunk)
+                            content_written += len(chunk)
+                            
+                            # Peek at first chunk for debugging
+                            if not content_peek:
+                                content_peek = chunk[:100]
+                                
+                logger.debug(f"Downloaded {content_written} bytes")
+                logger.debug(f"First 100 bytes: {content_peek}")
+                
+                # Check if downloaded content is HTML
+                if b'<html' in content_peek.lower() or b'<!doctype' in content_peek.lower():
+                    logger.error("Downloaded content appears to be HTML (likely login page)")
+                    
+                    # Read and log the HTML content for debugging
+                    try:
+                        with open(save_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            html_preview = f.read(500)
+                        logger.error(f"HTML content preview: {html_preview}")
+                    except Exception:
+                        pass
+                    
+                    return False
+                elif content_peek.startswith(b'%PDF'):
+                    logger.debug("Downloaded content appears to be a valid PDF")
+                else:
+                    logger.warning(f"Downloaded content format unclear: {content_peek[:50]}")
+                
                 return True
                 
             logger.error(f"Failed to download file. Status: {response.status_code}")
+            logger.error(f"Response text preview: {response.text[:200]}")
             return False
             
         except Exception as e:
             logger.error(f"Error downloading file: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return False
             
     def close(self):

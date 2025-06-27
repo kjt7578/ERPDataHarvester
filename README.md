@@ -87,9 +87,10 @@ python main.py --type candidate --page 5
 # 특정 후보자만 처리
 # URL 번호로 접근하지만, 실제 candidate_id로 저장
 python main.py --type candidate --id 65586
+python main.py --type candidate --id 65607
 
 # 범위로 다운로드
-python main.py --type candidate --range "65585-65580"
+python main.py --type candidate --range "65607-65606"
 
 # 개별 ID로 다운로드
 python main.py --type candidate --range "65580,65581,65582,65583,65584,65585"

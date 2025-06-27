@@ -29,10 +29,16 @@ class MetadataSaver:
         self.results_dir = Path(results_dir)
         self.case_dir = Path("case")  # New case directory
         
+        # Create metadata subdirectories
+        self.metadata_case_dir = self.metadata_dir / "case"
+        self.metadata_resume_dir = self.metadata_dir / "resume"
+        
         # Create directories
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.case_dir.mkdir(parents=True, exist_ok=True)
+        self.metadata_case_dir.mkdir(parents=True, exist_ok=True)
+        self.metadata_resume_dir.mkdir(parents=True, exist_ok=True)
         
         # Define file paths
         self.candidates_json_path = self.results_dir / "candidates.json"
@@ -63,7 +69,7 @@ class MetadataSaver:
                 id=candidate_id
             )
             metadata_filename = f"{filename}.meta.json"
-            metadata_path = self.metadata_dir / metadata_filename
+            metadata_path = self.metadata_resume_dir / metadata_filename
             
             # Prepare metadata
             metadata = {
@@ -116,7 +122,7 @@ class MetadataSaver:
             sanitized_title = self._sanitize_name(job_title)
             filename = f"{sanitized_company}_{sanitized_title}_{case_id}"
             metadata_filename = f"{filename}.case.meta.json"
-            metadata_path = self.metadata_dir / metadata_filename
+            metadata_path = self.metadata_case_dir / metadata_filename
             
             # Prepare metadata
             metadata = {

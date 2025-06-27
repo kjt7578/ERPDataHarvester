@@ -44,6 +44,10 @@ ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수
   - Benefits 정보: Insurance, 401K, Overtime Pay, Vacation 등
 - **새로운 저장 시스템**: `clientName_PositionTitle_caseID.json` 형식으로 `case/` 폴더에 저장
 - **JobCaseInfo 데이터클래스 확장**: 모든 JD 필드 타입 정의 및 Optional 처리
+- **폴더 구조 개선**: 
+  - 이력서 저장: `resume/` 폴더 (기존 `resumes/`에서 변경)
+  - 메타데이터 분리: `metadata/case/`, `metadata/resume/` 서브폴더로 분리
+  - 케이스 JD: `case/` 폴더에 상세 정보 저장
 - **듀얼 저장 지원**: 기존 metadata 폴더 + 새로운 case 폴더 동시 저장
 
 **구현된 기능:**
@@ -51,6 +55,24 @@ ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수
 - 복합 구조 처리: Language 능력 레벨, Vacation 정보 등 nested 데이터 파싱
 - 에러 처리: 필드별 개별 에러 처리로 부분 실패시에도 안정적 작동
 - 파일명 정규화: 안전한 파일명 생성 및 특수문자 처리
+- 체계적 폴더 관리: 타입별 폴더 분리로 정리된 구조
+
+**폴더 구조:**
+```
+project_root/
+├── case/                           # 케이스 JD 상세 정보
+│   └── {clientName}_{positionTitle}_{caseID}.json
+├── metadata/
+│   ├── case/                       # 케이스 메타데이터
+│   │   └── {clientName}_{positionTitle}_{caseID}.case.meta.json
+│   └── resume/                     # 이력서 메타데이터
+│       └── {candidateName}_{candidateID}_resume.meta.json
+├── resume/                         # PDF 이력서 파일
+│   └── {year}/{month}/{candidateName}_{candidateID}_resume.pdf
+└── results/                        # 통합 결과
+    ├── candidates.json/csv
+    └── cases.json/csv
+```
 
 **기술적 특징:**
 - 다중 패턴 매칭으로 필드 추출 안정성 보장

@@ -18,6 +18,8 @@ VENV/
 *~
 
 # Project specific
+.cursor/
+case/
 resumes/
 metadata/
 results/

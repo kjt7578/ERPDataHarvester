@@ -657,7 +657,8 @@ class ERPResumeHarvester:
             
             case_info = self._process_specific_case(str(case_id), save_individual=False)
             if case_info:
-                # Save individual JD info for each case in range
+                # Save individual metadata and JD info for each case in range
+                self.metadata_saver.save_case_metadata(case_info)
                 self.metadata_saver.save_case_jd_info(case_info)
                 all_cases.append(case_info)
                 successful_count += 1
