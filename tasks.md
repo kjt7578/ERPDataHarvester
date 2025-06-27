@@ -34,6 +34,52 @@ ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수
 
 ## 📝 주요 업데이트 (Major Updates)
 
+### 2025-06-27: 포괄적인 에러 추적 및 보고서 시스템 구현 완료 ✅
+**주요 성과:**
+- **상세 에러 추적**: 모든 처리 단계에서 발생하는 에러와 경고 체계적 기록
+  - 에러 타입: CONNECTION_ERROR, PARSE_ERROR, DOWNLOAD_FAILED, METADATA_SAVE_ERROR 등
+  - 경고 타입: NO_RESUME_URL, MISSING_DATA, DATE_EXTRACTION_FAILED 등
+  - 각 에러/경고마다 candidate_id, name, detail_url, 상세 메시지, timestamp 포함
+- **강화된 보고서**: 기존 다운로드 리포트에서 포괄적인 처리 보고서로 업그레이드
+  - 🚨 PROCESSING ERRORS: 심각한 에러 상세 정보
+  - ⚠️ WARNINGS: 데이터 품질 이슈 및 누락 정보
+  - ✅ 성공/⏭️ 스킵/❌ 실패 섹션별 분류
+  - 💡 RECOMMENDATIONS: 문제 해결 제안사항 자동 생성
+- **에러 컨텍스트 보강**: 모든 에러에 detail_url과 candidate 정보 포함
+- **보고서 파일명 개선**: `processing_report_{timestamp}.txt`로 변경
+
+**구현된 기능:**
+- 에러 기록: `metadata_saver.record_error()` 및 `record_warning()` 메서드
+- 단계별 에러 추적: 연결, 파싱, 다운로드, 메타데이터 저장 각 단계 개별 처리
+- 자동 컨텍스트 수집: candidate 정보 파싱 성공시 이름 자동 업데이트
+- 중복 에러 방지: 동일 candidate에 대한 중복 에러 기록 방지
+- 체계적 분류: 에러와 경고를 타입별로 분류하여 분석 용이성 증대
+
+**에러 추적 예시:**
+```
+🚨 PROCESSING ERRORS:
+  1. ERROR: DOWNLOAD_FAILED
+     Candidate ID: 65508
+     Name: Taewon Jung
+     Detail URL: http://erp.hrcap.com/candidate/dispView/65508?kw=
+     Error Message: Resume download failed - check downloader logs for details
+     Timestamp: 2025-06-27T13:47:22.771698
+
+⚠️ WARNINGS:
+  1. WARNING: NO_RESUME_URL
+     Candidate ID: 99999
+     Name: Candidate Information
+     Detail URL: http://erp.hrcap.com/candidate/dispView/99999?kw=
+     Warning Message: No resume download URL found
+     Timestamp: 2025-06-27T13:47:22.771698
+```
+
+**기술적 특징:**
+- 모든 예외 상황에서 상세 컨텍스트 보존
+- 부분 실패시에도 수집 가능한 데이터는 저장
+- 문제 유형별 자동 분류 및 해결 방안 제시
+- 실시간 로깅과 최종 보고서 이중 추적 시스템
+
 ### 2025-01-02: 케이스 JD 상세 정보 수집 시스템 구현 완료 ✅
 **주요 성과:**
 - **JD 정보 완전 추출**: 케이스 페이지의 모든 상세 JD 정보 수집 구현

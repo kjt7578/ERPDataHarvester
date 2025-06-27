@@ -50,6 +50,15 @@ class MetadataSaver:
         self.processing_errors = []
         self.warnings = []
         
+        # Initialize command info
+        self.command_info = {
+            'data_type': None,
+            'execution_mode': None,
+            'target_range': None,
+            'start_time': None,
+            'end_time': None
+        }
+        
     def record_error(self, candidate_id: str, name: str, detail_url: str, error_type: str, error_message: str):
         """
         Record a processing error for later reporting
@@ -93,6 +102,25 @@ class MetadataSaver:
         }
         self.warnings.append(warning_record)
         logger.warning(f"Recorded warning for {name} ({candidate_id}): {warning_type} - {warning_message}")
+        
+    def set_command_info(self, data_type: str, execution_mode: str, target_range: str = None, start_time: str = None):
+        """
+        Set command execution information for report
+        
+        Args:
+            data_type: 'candidate' or 'case'
+            execution_mode: 'single_id', 'id_range', 'page_crawl', etc.
+            target_range: Target ID(s) or page range
+            start_time: Execution start time
+        """
+        self.command_info.update({
+            'data_type': data_type,
+            'execution_mode': execution_mode,
+            'target_range': target_range,
+            'start_time': start_time,
+            'end_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+        logger.info(f"Command info set: {data_type} {execution_mode} {target_range}")
         
     def save_candidate_metadata(self, candidate_info: Dict[str, Any], 
                                pdf_path: Optional[Path] = None) -> bool:
@@ -583,8 +611,21 @@ class MetadataSaver:
                 f.write("=" * 60 + "\n\n")
                 f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 
+                # Command Information Section
+                f.write("📋 Command Information:\n")
+                f.write("-" * 30 + "\n")
+                f.write(f"Data Type: {self.command_info.get('data_type', 'N/A').upper()}\n")
+                f.write(f"Execution Mode: {self.command_info.get('execution_mode', 'N/A')}\n")
+                if self.command_info.get('target_range'):
+                    f.write(f"Target Range: {self.command_info.get('target_range')}\n")
+                if self.command_info.get('start_time'):
+                    f.write(f"Started: {self.command_info.get('start_time')}\n")
+                if self.command_info.get('end_time'):
+                    f.write(f"Completed: {self.command_info.get('end_time')}\n")
+                f.write("\n")
+                
                 # Processing Statistics Summary
-                f.write("Processing Statistics:\n")
+                f.write("📊 Processing Statistics:\n")
                 f.write("-" * 30 + "\n")
                 f.write(f"Total candidates processed: {download_stats.get('total', 0)}\n")
                 f.write(f"Successful downloads: {download_stats.get('successful', 0)}\n")

@@ -144,18 +144,28 @@ class ERPResumeHarvester:
                 
             self.stats['start_time'] = datetime.now()
             
+            # Set command information for report
+            start_time = self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')
+            
             if specific_id:
                 logging.info(f"Processing specific candidate: {specific_id}")
+                self.metadata_saver.set_command_info('candidate', 'single_id', specific_id, start_time)
                 success = self._process_specific_candidate(specific_id) is not None
             elif id_range:
                 logging.info(f"Processing ID range: {id_range}")
+                self.metadata_saver.set_command_info('candidate', 'id_range', id_range, start_time)
                 success = self._process_id_range(id_range)
             else:
                 logging.info("Starting full harvest process...")
+                self.metadata_saver.set_command_info('candidate', 'page_crawl', f'from page {start_page}', start_time)
                 success = self._process_all_candidates(start_page)
                 
             self.stats['end_time'] = datetime.now()
             self._print_summary()
+            
+            # Generate report (case에는 다운로드가 없으므로 빈 stats 사용)
+            download_stats = {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+            self.metadata_saver.generate_download_report(download_stats)
             
             return success
             
@@ -576,19 +586,27 @@ class ERPResumeHarvester:
                 return False
                 
             self.stats['start_time'] = datetime.now()
+            start_time = self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')
             
             if specific_id:
                 logging.info(f"Processing specific case: {specific_id}")
+                self.metadata_saver.set_command_info('case', 'single_id', specific_id, start_time)
                 success = self._process_specific_case(specific_id) is not None
             elif id_range:
                 logging.info(f"Processing case ID range: {id_range}")
+                self.metadata_saver.set_command_info('case', 'id_range', id_range, start_time)
                 success = self._process_case_id_range(id_range)
             else:
                 logging.info("Starting full case harvest process...")
+                self.metadata_saver.set_command_info('case', 'page_crawl', f'from page {start_page}', start_time)
                 success = self._process_all_cases(start_page)
                 
             self.stats['end_time'] = datetime.now()
             self._print_summary()
+            
+            # Generate report (case에는 다운로드가 없으므로 빈 stats 사용)
+            download_stats = {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+            self.metadata_saver.generate_download_report(download_stats)
             
             return success
             
@@ -643,6 +661,10 @@ class ERPResumeHarvester:
         # Save consolidated results
         if all_cases:
             self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
+            
+        # Generate report for case processing
+        download_stats = {'total': len(all_cases), 'successful': len(all_cases), 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+        self.metadata_saver.generate_download_report(download_stats)
             
         return len(all_cases) > 0
 
@@ -767,6 +789,10 @@ class ERPResumeHarvester:
         if all_cases:
             logging.info(f"Saving consolidated case results for {len(all_cases)} cases")
             self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
+            
+        # Generate report for case processing
+        download_stats = {'total': len(all_cases), 'successful': len(all_cases), 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+        self.metadata_saver.generate_download_report(download_stats)
             
         logging.info(f"Case ID range processing complete: {successful_count}/{len(case_ids)} successful")
         return successful_count > 0
