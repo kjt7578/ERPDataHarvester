@@ -929,9 +929,14 @@ class ERPScraper:
         url_id = jobcase_id  # Keep URL ID as backup
         info = {
             'jobcase_id': jobcase_id,  # Will be updated with actual Case No
-            'job_title': 'Unknown',
+            'job_title': f'Case {jobcase_id}',  # Default title using URL ID
             'created_date': datetime.now().strftime('%Y-%m-%d'),
             'updated_date': datetime.now().strftime('%Y-%m-%d'),
+            'company_name': 'Unknown Company',
+            'job_status': 'Unknown',
+            'assigned_team': 'Unknown',
+            'drafter': 'Unknown',
+            'candidate_ids': []
         }
         
         # Extract actual Case No (not URL ID)
@@ -950,8 +955,16 @@ class ERPScraper:
                     case_no_td = case_no_th.find_next_sibling('td')
                     if case_no_td:
                         actual_case_id = case_no_td.get_text(strip=True)
-                        info['jobcase_id'] = actual_case_id
-                        logger.info(f"Found actual Case No: {actual_case_id} (URL ID: {jobcase_id}) using pattern: {pattern}")
+                        if actual_case_id:  # Only update if not empty
+                            info['jobcase_id'] = actual_case_id
+                            logger.info(f"Found actual Case No: {actual_case_id} (URL ID: {jobcase_id}) using pattern: {pattern}")
+                            
+                            # Collect mapping data for pattern analysis
+                            try:
+                                from file_utils import collect_case_id_mappings
+                                collect_case_id_mappings(jobcase_id, actual_case_id)
+                            except ImportError:
+                                pass  # Ignore if import fails
                         break
                         
             # If still not found, try looking for text containing case number
@@ -966,6 +979,13 @@ class ERPScraper:
                         info['jobcase_id'] = actual_case_id
                         logger.info(f"Found actual Case No from title: {actual_case_id} (URL ID: {jobcase_id})")
                         
+                        # Collect mapping data for pattern analysis
+                        try:
+                            from file_utils import collect_case_id_mappings
+                            collect_case_id_mappings(jobcase_id, actual_case_id)
+                        except ImportError:
+                            pass  # Ignore if import fails
+                        
             if not actual_case_id:
                 logger.warning(f"Case No not found in any pattern, keeping URL ID: {jobcase_id}")
                 
@@ -975,72 +995,164 @@ class ERPScraper:
             
         # Extract company name from Client table row
         try:
-            client_th = soup.find('th', string='Client')
-            if client_th:
-                client_td = client_th.find_next_sibling('td')
-                if client_td:
-                    info['company_name'] = client_td.get_text(strip=True)
-                    logger.info(f"Found company name: {info['company_name']}")
+            # Try multiple patterns for company name
+            company_patterns = ['Client', 'Company', 'Client Name', 'Company Name']
+            company_name = None
+            
+            for pattern in company_patterns:
+                client_th = soup.find('th', string=pattern)
+                if not client_th:
+                    # Try partial match
+                    client_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if client_th:
+                    client_td = client_th.find_next_sibling('td')
+                    if client_td:
+                        company_name = client_td.get_text(strip=True)
+                        if company_name:  # Only update if not empty
+                            info['company_name'] = company_name
+                            logger.info(f"Found company name: {info['company_name']} using pattern: {pattern}")
+                            break
+                            
+            # If still not found, try looking in all table cells
+            if not company_name:
+                all_tds = soup.find_all('td')
+                for td in all_tds:
+                    text = td.get_text(strip=True)
+                    # Look for text that might be a company name (not empty, not numeric, not too short)
+                    if text and len(text) > 2 and not text.isdigit() and not text.startswith('http'):
+                        # Check if previous th contains "client" or "company"
+                        prev_th = td.find_previous_sibling('th')
+                        if prev_th and ('client' in prev_th.get_text(strip=True).lower() or 
+                                      'company' in prev_th.get_text(strip=True).lower()):
+                            info['company_name'] = text
+                            logger.info(f"Found company name from pattern search: {text}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract company name: {e}")
             
         # Extract position title
         try:
-            position_th = soup.find('th', string='Position Title')
-            if position_th:
-                position_td = position_th.find_next_sibling('td')
-                if position_td:
-                    info['job_title'] = position_td.get_text(strip=True)
-                    logger.info(f"Found position title: {info['job_title']}")
+            # Try multiple patterns for position title
+            position_patterns = ['Position Title', 'Job Title', 'Position', 'Title', 'Role']
+            job_title = None
+            
+            for pattern in position_patterns:
+                position_th = soup.find('th', string=pattern)
+                if not position_th:
+                    # Try partial match
+                    position_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if position_th:
+                    position_td = position_th.find_next_sibling('td')
+                    if position_td:
+                        job_title = position_td.get_text(strip=True)
+                        if job_title:  # Only update if not empty
+                            info['job_title'] = job_title
+                            logger.info(f"Found position title: {info['job_title']} using pattern: {pattern}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract position title: {e}")
             
         # Extract case status
         try:
-            status_th = soup.find('th', string='Case Status')
-            if status_th:
-                status_td = status_th.find_next_sibling('td')
-                if status_td:
-                    info['job_status'] = status_td.get_text(strip=True)
-                    logger.info(f"Found case status: {info['job_status']}")
+            # Try multiple patterns for case status
+            status_patterns = ['Case Status', 'Status', 'Job Status', 'State']
+            job_status = None
+            
+            for pattern in status_patterns:
+                status_th = soup.find('th', string=pattern)
+                if not status_th:
+                    # Try partial match
+                    status_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if status_th:
+                    status_td = status_th.find_next_sibling('td')
+                    if status_td:
+                        job_status = status_td.get_text(strip=True)
+                        if job_status:  # Only update if not empty
+                            info['job_status'] = job_status
+                            logger.info(f"Found case status: {info['job_status']} using pattern: {pattern}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract case status: {e}")
             
         # Extract register date
         try:
-            register_th = soup.find('th', string='Register Date')
-            if register_th:
-                register_td = register_th.find_next_sibling('td')
-                if register_td:
-                    date_text = register_td.get_text(strip=True)
-                    # Convert MM/DD/YYYY to YYYY-MM-DD
-                    date_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', date_text)
-                    if date_match:
-                        month, day, year = date_match.groups()
-                        info['created_date'] = f"{year}-{month}-{day}"
-                        logger.info(f"Found register date: {info['created_date']}")
+            # Try multiple patterns for register date
+            date_patterns = ['Register Date', 'Created Date', 'Start Date', 'Date']
+            register_date = None
+            
+            for pattern in date_patterns:
+                register_th = soup.find('th', string=pattern)
+                if not register_th:
+                    # Try partial match
+                    register_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if register_th:
+                    register_td = register_th.find_next_sibling('td')
+                    if register_td:
+                        date_text = register_td.get_text(strip=True)
+                        # Convert MM/DD/YYYY to YYYY-MM-DD
+                        date_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', date_text)
+                        if date_match:
+                            month, day, year = date_match.groups()
+                            register_date = f"{year}-{month}-{day}"
+                            info['created_date'] = register_date
+                            logger.info(f"Found register date: {info['created_date']} using pattern: {pattern}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract register date: {e}")
             
         # Extract assigned team
         try:
-            team_th = soup.find('th', string='Assigned Team')
-            if team_th:
-                team_td = team_th.find_next_sibling('td')
-                if team_td:
-                    info['assigned_team'] = team_td.get_text(strip=True)
-                    logger.info(f"Found assigned team: {info['assigned_team']}")
+            # Try multiple patterns for assigned team
+            team_patterns = ['Assigned Team', 'Team', 'Department', 'Group']
+            assigned_team = None
+            
+            for pattern in team_patterns:
+                team_th = soup.find('th', string=pattern)
+                if not team_th:
+                    # Try partial match
+                    team_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if team_th:
+                    team_td = team_th.find_next_sibling('td')
+                    if team_td:
+                        assigned_team = team_td.get_text(strip=True)
+                        if assigned_team:  # Only update if not empty
+                            info['assigned_team'] = assigned_team
+                            logger.info(f"Found assigned team: {info['assigned_team']} using pattern: {pattern}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract assigned team: {e}")
             
         # Extract drafter
         try:
-            drafter_th = soup.find('th', string='Drafter')
-            if drafter_th:
-                drafter_td = drafter_th.find_next_sibling('td')
-                if drafter_td:
-                    info['drafter'] = drafter_td.get_text(strip=True)
-                    logger.info(f"Found drafter: {info['drafter']}")
+            # Try multiple patterns for drafter
+            drafter_patterns = ['Drafter', 'Created By', 'Author', 'Owner']
+            drafter = None
+            
+            for pattern in drafter_patterns:
+                drafter_th = soup.find('th', string=pattern)
+                if not drafter_th:
+                    # Try partial match
+                    drafter_th = soup.find('th', string=re.compile(pattern, re.IGNORECASE))
+                    
+                if drafter_th:
+                    drafter_td = drafter_th.find_next_sibling('td')
+                    if drafter_td:
+                        drafter = drafter_td.get_text(strip=True)
+                        if drafter:  # Only update if not empty
+                            info['drafter'] = drafter
+                            logger.info(f"Found drafter: {info['drafter']} using pattern: {pattern}")
+                            break
+                            
         except Exception as e:
             logger.debug(f"Failed to extract drafter: {e}")
             

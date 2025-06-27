@@ -16,9 +16,19 @@ from scraper import ERPScraper, CandidateInfo, JobCaseInfo
 from downloader import PDFDownloader
 from metadata_saver import MetadataSaver
 from file_utils import (
-    generate_filename_from_template, 
+    sanitize_filename, 
+    generate_resume_filename,
+    generate_case_filename,
     extract_date_parts,
-    create_directory_structure
+    create_directory_structure,
+    convert_candidate_id,
+    convert_case_id,
+    parse_id_range,
+    parse_case_id_range,
+    predict_real_candidate_id,
+    predict_url_candidate_id,
+    predict_real_case_id,
+    predict_url_case_id
 )
 
 
@@ -126,7 +136,8 @@ class ERPResumeHarvester:
             
     def harvest_candidates(self, start_page: int = 1, 
                           specific_id: Optional[str] = None,
-                          id_range: Optional[str] = None) -> bool:
+                          id_range: Optional[str] = None,
+                          id_type: str = 'url') -> bool:
         """
         Harvest candidates from ERP system
         
@@ -134,6 +145,7 @@ class ERPResumeHarvester:
             start_page: Starting page number for full harvest
             specific_id: Process only this specific candidate ID
             id_range: Process range of IDs (format: "65585-65580" or "65580,65581,65582")
+            id_type: Type of IDs ('url', 'real', or 'auto')
             
         Returns:
             True if successful, False otherwise
@@ -143,29 +155,30 @@ class ERPResumeHarvester:
                 return False
                 
             self.stats['start_time'] = datetime.now()
-            
-            # Set command information for report
             start_time = self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')
             
             if specific_id:
-                logging.info(f"Processing specific candidate: {specific_id}")
-                self.metadata_saver.set_command_info('candidate', 'single_id', specific_id, start_time)
-                success = self._process_specific_candidate(specific_id) is not None
+                # Convert ID if needed
+                id_info = convert_candidate_id(specific_id, id_type)
+                url_id = str(id_info['url_id'])
+                real_id = str(id_info['real_id'])
+                
+                logging.info(f"Processing specific candidate: {specific_id} (ID type: {id_type})")
+                logging.info(f"  URL ID: {url_id}, Real ID: {real_id}")
+                
+                self.metadata_saver.set_command_info('candidate', 'single_id', f"{specific_id} ({id_type})", start_time)
+                success = self._process_specific_candidate(url_id) is not None
             elif id_range:
-                logging.info(f"Processing ID range: {id_range}")
-                self.metadata_saver.set_command_info('candidate', 'id_range', id_range, start_time)
-                success = self._process_id_range(id_range)
+                logging.info(f"Processing candidate ID range: {id_range} (ID type: {id_type})")
+                self.metadata_saver.set_command_info('candidate', 'id_range', f"{id_range} ({id_type})", start_time)
+                success = self._process_id_range(id_range, id_type)
             else:
-                logging.info("Starting full harvest process...")
+                logging.info("Starting full candidate harvest process...")
                 self.metadata_saver.set_command_info('candidate', 'page_crawl', f'from page {start_page}', start_time)
                 success = self._process_all_candidates(start_page)
                 
             self.stats['end_time'] = datetime.now()
             self._print_summary()
-            
-            # Generate report (case에는 다운로드가 없으므로 빈 stats 사용)
-            download_stats = {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
-            self.metadata_saver.generate_download_report(download_stats)
             
             return success
             
@@ -177,7 +190,7 @@ class ERPResumeHarvester:
             return False
         finally:
             self.cleanup()
-            
+
     def _process_all_candidates(self, start_page: int) -> bool:
         """Process all candidates from multiple pages"""
         all_candidates = []
@@ -439,11 +452,11 @@ class ERPResumeHarvester:
             
     def _download_candidate_resume(self, candidate_info: CandidateInfo) -> Optional[Path]:
         """Download resume for a candidate"""
-        # Generate filename
-        filename = generate_filename_from_template(
-            template=config.file_name_pattern,
+        # Generate filename using new bracket format
+        filename = generate_resume_filename(
             name=candidate_info.name,
-            candidate_id=candidate_info.candidate_id
+            candidate_id=candidate_info.candidate_id,
+            extension='pdf'
         )
         
         # Determine directory based on created date
@@ -488,88 +501,82 @@ class ERPResumeHarvester:
         if self.session:
             self.session.close()
 
-    def _process_id_range(self, id_range: str) -> bool:
+    def _process_id_range(self, id_range: str, id_type: str = 'url') -> bool:
         """
-        Process a range of candidate IDs
+        Process a range of candidate IDs with support for both URL and Real IDs
         
         Args:
-            id_range: Range specification like "65585-65580" or "65580,65581,65582"
+            id_range: Range specification like "65585-65580" or "1044759-1044754"
+            id_type: Type of IDs ('url', 'real', or 'auto')
             
         Returns:
             True if at least one candidate was processed successfully
         """
-        candidate_ids = []
-        
-        # Parse different range formats
-        if '-' in id_range:
-            # Range format: "65585-65580" (from high to low)
-            try:
-                parts = id_range.split('-')
-                if len(parts) == 2:
-                    start_id = int(parts[0])
-                    end_id = int(parts[1])
+        try:
+            # Parse the range and convert to URL IDs (for ERP access)
+            candidate_url_ids = parse_id_range(id_range, id_type)
+            
+            if not candidate_url_ids:
+                logging.error("No candidate IDs generated from range")
+                return False
+                
+            # Log conversion information
+            if id_type == 'real':
+                logging.info(f"Converted real ID range to URL IDs: {candidate_url_ids[0]} to {candidate_url_ids[-1]}")
+            elif id_type == 'auto':
+                # Show both for auto-detected
+                sample_id = candidate_url_ids[0]
+                real_id = predict_real_candidate_id(sample_id)
+                logging.info(f"Auto-detected as {id_type} IDs. URL: {sample_id}, Real: {real_id}")
+                
+            logging.info(f"Processing {len(candidate_url_ids)} candidates: {candidate_url_ids[0]} to {candidate_url_ids[-1]}")
+            
+            all_candidates = []
+            successful_count = 0
+            
+            for i, candidate_url_id in enumerate(candidate_url_ids, 1):
+                logging.info(f"Processing candidate {i}/{len(candidate_url_ids)}: URL ID {candidate_url_id}")
+                
+                candidate_info = self._process_specific_candidate(str(candidate_url_id), save_individual=False)
+                if candidate_info:
+                    all_candidates.append(candidate_info)
+                    successful_count += 1
                     
-                    # Ensure we go from high to low or low to high
-                    if start_id > end_id:
-                        candidate_ids = list(range(start_id, end_id - 1, -1))  # Descending
-                    else:
-                        candidate_ids = list(range(start_id, end_id + 1))  # Ascending
+                    # Show both IDs in success message
+                    real_id = candidate_info.get('candidate_id', 'Unknown')
+                    name = candidate_info.get('name', 'Unknown')
+                    logging.info(f"✅ Successfully processed: URL {candidate_url_id} → Real {real_id} ({name})")
                 else:
-                    raise ValueError("Invalid range format")
-            except ValueError:
-                logging.error(f"Invalid range format: {id_range}. Use format like '65585-65580'")
-                return False
+                    predicted_real_id = predict_real_candidate_id(candidate_url_id)
+                    logging.warning(f"❌ Failed to process: URL {candidate_url_id} (predicted Real {predicted_real_id})")
+                    
+                # Add delay between requests to be respectful to server
+                if i < len(candidate_url_ids):  # Don't delay after last item
+                    time.sleep(config.request_delay)
+                    
+            # Save consolidated results
+            if all_candidates:
+                logging.info(f"Saving consolidated results for {len(all_candidates)} candidates")
+                self.metadata_saver.save_consolidated_results(all_candidates)
                 
-        elif ',' in id_range:
-            # Comma-separated format: "65580,65581,65582"
-            try:
-                candidate_ids = [int(id_str.strip()) for id_str in id_range.split(',')]
-            except ValueError:
-                logging.error(f"Invalid comma-separated format: {id_range}")
-                return False
-        else:
-            logging.error(f"Invalid ID range format: {id_range}. Use '65585-65580' or '65580,65581,65582'")
+            # Generate report
+            download_stats = self.downloader.get_statistics()
+            self.metadata_saver.generate_download_report(download_stats)
+            
+            logging.info(f"ID range processing complete: {successful_count}/{len(candidate_url_ids)} successful")
+            return successful_count > 0
+            
+        except ValueError as e:
+            logging.error(f"Invalid ID range: {e}")
             return False
-            
-        if not candidate_ids:
-            logging.error("No candidate IDs generated from range")
+        except Exception as e:
+            logging.error(f"Error processing ID range: {e}")
             return False
-            
-        logging.info(f"Processing {len(candidate_ids)} candidates: {candidate_ids[0]} to {candidate_ids[-1]}")
-        
-        all_candidates = []
-        successful_count = 0
-        
-        for i, candidate_id in enumerate(candidate_ids, 1):
-            logging.info(f"Processing candidate {i}/{len(candidate_ids)}: {candidate_id}")
-            
-            candidate_info = self._process_specific_candidate(str(candidate_id), save_individual=False)
-            if candidate_info:
-                all_candidates.append(candidate_info)
-                successful_count += 1
-                logging.info(f"✅ Successfully processed {candidate_id}")
-            else:
-                logging.warning(f"❌ Failed to process {candidate_id}")
-                
-            # Add delay between requests to be respectful to server
-            if i < len(candidate_ids):  # Don't delay after last item
-                time.sleep(config.request_delay)
-                
-        # Save consolidated results
-        if all_candidates:
-            logging.info(f"Saving consolidated results for {len(all_candidates)} candidates")
-            self.metadata_saver.save_consolidated_results(all_candidates)
-            
-        # Generate report
-        download_stats = self.downloader.get_statistics()
-        self.metadata_saver.generate_download_report(download_stats)
-        
-        logging.info(f"ID range processing complete: {successful_count}/{len(candidate_ids)} successful")
-        return successful_count > 0
 
     def harvest_cases(self, start_page: int = 1, 
                      specific_id: Optional[str] = None,
-                     id_range: Optional[str] = None) -> bool:
+                     id_range: Optional[str] = None,
+                     id_type: str = 'url') -> bool:
         """
         Harvest cases from ERP system
         
@@ -577,6 +584,7 @@ class ERPResumeHarvester:
             start_page: Starting page number for full harvest
             specific_id: Process only this specific case ID
             id_range: Process range of IDs (format: "3897-3895" or "3895,3896,3897")
+            id_type: Type of IDs ('url', 'real', or 'auto') - currently cases use same ID
             
         Returns:
             True if successful, False otherwise
@@ -589,13 +597,21 @@ class ERPResumeHarvester:
             start_time = self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')
             
             if specific_id:
-                logging.info(f"Processing specific case: {specific_id}")
-                self.metadata_saver.set_command_info('case', 'single_id', specific_id, start_time)
-                success = self._process_specific_case(specific_id) is not None
+                # For cases, currently URL and Real IDs are handled the same
+                id_info = convert_case_id(specific_id, id_type)
+                url_id = id_info['url_id']
+                
+                logging.info(f"Processing specific case: {specific_id} (ID type: {id_type})")
+                logging.info(f"  Using ID: {url_id}")
+                
+                self.metadata_saver.set_command_info('case', 'single_id', f"{specific_id} ({id_type})", start_time)
+                success = self._process_specific_case(url_id) is not None
             elif id_range:
-                logging.info(f"Processing case ID range: {id_range}")
-                self.metadata_saver.set_command_info('case', 'id_range', id_range, start_time)
-                success = self._process_case_id_range(id_range)
+                logging.info(f"Processing case ID range: {id_range} (ID type: {id_type})")
+                self.metadata_saver.set_command_info('case', 'id_range', f"{id_range} ({id_type})", start_time)
+                success = self._process_case_id_range(id_range, id_type)
+                # _process_case_id_range already generates its own report, so we skip the duplicate report generation
+                return success
             else:
                 logging.info("Starting full case harvest process...")
                 self.metadata_saver.set_command_info('case', 'page_crawl', f'from page {start_page}', start_time)
@@ -605,7 +621,17 @@ class ERPResumeHarvester:
             self._print_summary()
             
             # Generate report (case에는 다운로드가 없으므로 빈 stats 사용)
-            download_stats = {'total': 0, 'successful': 0, 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+            download_stats = {
+                'total': self.stats.get('candidates_found', 0),  # Reusing for cases
+                'successful': self.stats.get('candidates_found', 0),
+                'failed': 0,
+                'skipped': 0,
+                'success_rate': 100.0 if self.stats.get('candidates_found', 0) > 0 else 0.0,
+                'total_size_mb': 0.0,
+                'successful_candidates': [],
+                'failed_candidates': [],
+                'skipped_candidates': []
+            }
             self.metadata_saver.generate_download_report(download_stats)
             
             return success
@@ -663,7 +689,17 @@ class ERPResumeHarvester:
             self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
             
         # Generate report for case processing
-        download_stats = {'total': len(all_cases), 'successful': len(all_cases), 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
+        download_stats = {
+            'total': len(all_cases),
+            'successful': len(all_cases),
+            'failed': 0,
+            'skipped': 0,
+            'success_rate': 100.0 if len(all_cases) > 0 else 0.0,
+            'total_size_mb': 0.0,
+            'successful_candidates': [],
+            'failed_candidates': [],
+            'skipped_candidates': []
+        }
         self.metadata_saver.generate_download_report(download_stats)
             
         return len(all_cases) > 0
@@ -727,75 +763,85 @@ class ERPResumeHarvester:
             logging.error(f"Error processing case {case_id}: {e}")
             return None
 
-    def _process_case_id_range(self, id_range: str) -> bool:
-        """Process a range of case IDs"""
-        case_ids = []
+    def _process_case_id_range(self, id_range: str, id_type: str = 'url') -> bool:
+        """
+        Process a range of case IDs with support for both URL and Real IDs
         
-        # Parse different range formats (same logic as candidates)
-        if '-' in id_range:
-            try:
-                parts = id_range.split('-')
-                if len(parts) == 2:
-                    start_id = int(parts[0])
-                    end_id = int(parts[1])
+        Args:
+            id_range: Range specification like "3897-3890" or "13897-13890"
+            id_type: Type of IDs ('url', 'real', or 'auto') 
+            
+        Returns:
+            True if at least one case was processed successfully
+        """
+        try:
+            # Parse the range and convert to URL IDs (for ERP access)
+            case_url_ids = parse_case_id_range(id_range, id_type)
+            
+            if not case_url_ids:
+                logging.error("No case IDs generated from range")
+                return False
+                
+            # Log conversion information
+            if id_type == 'real':
+                logging.info(f"Converted real Case ID range to URL IDs: {case_url_ids[0]} to {case_url_ids[-1]}")
+            elif id_type == 'auto':
+                # Show both for auto-detected
+                sample_id = case_url_ids[0]
+                real_id = predict_real_case_id(sample_id)
+                logging.info(f"Auto-detected as {id_type} IDs. URL: {sample_id}, Real: {real_id}")
+                
+            logging.info(f"Processing {len(case_url_ids)} cases: {case_url_ids[0]} to {case_url_ids[-1]} (ID type: {id_type})")
+            
+            all_cases = []
+            successful_count = 0
+            
+            for i, case_url_id in enumerate(case_url_ids, 1):
+                logging.info(f"Processing case {i}/{len(case_url_ids)}: URL ID {case_url_id}")
+                
+                case_info = self._process_specific_case(str(case_url_id), save_individual=False)
+                if case_info:
+                    all_cases.append(case_info)
+                    successful_count += 1
                     
-                    if start_id > end_id:
-                        case_ids = list(range(start_id, end_id - 1, -1))
-                    else:
-                        case_ids = list(range(start_id, end_id + 1))
+                    company = case_info.get('company_name', 'Unknown Company')
+                    title = case_info.get('job_title', 'Unknown Position')
+                    actual_id = case_info.get('jobcase_id', case_url_id)
+                    predicted_real_id = predict_real_case_id(case_url_id)
+                    logging.info(f"✅ Successfully processed: URL {case_url_id} → Real {actual_id} (예상: {predicted_real_id}) ({company} - {title})")
                 else:
-                    raise ValueError("Invalid range format")
-            except ValueError:
-                logging.error(f"Invalid range format: {id_range}")
-                return False
+                    predicted_real_id = predict_real_case_id(case_url_id)
+                    logging.warning(f"❌ Failed to process: URL {case_url_id} (predicted Real {predicted_real_id})")
+                    
+                # Add delay between requests to be respectful to server
+                if i < len(case_url_ids):  # Don't delay after last item
+                    time.sleep(config.request_delay)
+                    
+            # Save consolidated results
+            if all_cases:
+                logging.info(f"Saving consolidated results for {len(all_cases)} cases")
+                self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
                 
-        elif ',' in id_range:
-            try:
-                case_ids = [int(id_str.strip()) for id_str in id_range.split(',')]
-            except ValueError:
-                logging.error(f"Invalid comma-separated format: {id_range}")
-                return False
-        else:
-            logging.error(f"Invalid ID range format: {id_range}")
+            # Generate report
+            download_stats = {
+                'total': len(case_url_ids),
+                'successful': successful_count,
+                'failed': len(case_url_ids) - successful_count,
+                'skipped': 0,
+                'success_rate': (successful_count / len(case_url_ids)) * 100 if case_url_ids else 0.0,
+                'total_size_mb': 0.0,
+                'successful_candidates': all_cases,  # Reusing for cases
+                'failed_candidates': [],
+                'skipped_candidates': []
+            }
+            self.metadata_saver.generate_download_report(download_stats)
+            
+            logging.info(f"Case ID range processing complete: {successful_count}/{len(case_url_ids)} successful")
+            return successful_count > 0
+            
+        except Exception as e:
+            logging.error(f"Error processing case ID range: {e}")
             return False
-            
-        if not case_ids:
-            logging.error("No case IDs generated from range")
-            return False
-            
-        logging.info(f"Processing {len(case_ids)} cases: {case_ids[0]} to {case_ids[-1]}")
-        
-        all_cases = []
-        successful_count = 0
-        
-        for i, case_id in enumerate(case_ids, 1):
-            logging.info(f"Processing case {i}/{len(case_ids)}: {case_id}")
-            
-            case_info = self._process_specific_case(str(case_id), save_individual=False)
-            if case_info:
-                # Save individual metadata and JD info for each case in range
-                self.metadata_saver.save_case_metadata(case_info)
-                self.metadata_saver.save_case_jd_info(case_info)
-                all_cases.append(case_info)
-                successful_count += 1
-                logging.info(f"✅ Successfully processed case {case_id}")
-            else:
-                logging.warning(f"❌ Failed to process case {case_id}")
-                
-            if i < len(case_ids):
-                time.sleep(config.request_delay)
-                
-        # Save consolidated results
-        if all_cases:
-            logging.info(f"Saving consolidated case results for {len(all_cases)} cases")
-            self.metadata_saver.save_consolidated_results(all_cases, data_type='case')
-            
-        # Generate report for case processing
-        download_stats = {'total': len(all_cases), 'successful': len(all_cases), 'failed': 0, 'skipped': 0, 'success_rate': 100.0, 'total_size_mb': 0.0, 'successful_candidates': [], 'failed_candidates': [], 'skipped_candidates': []}
-        self.metadata_saver.generate_download_report(download_stats)
-            
-        logging.info(f"Case ID range processing complete: {successful_count}/{len(case_ids)} successful")
-        return successful_count > 0
 
 
 def main():
@@ -821,12 +867,28 @@ def main():
     parser.add_argument(
         '--id',
         type=str,
-        help='Process specific candidate/case ID'
+        help='Process specific candidate/case by URL ID (traditional method)'
     )
     parser.add_argument(
         '--range',
         type=str,
-        help='Process range of IDs (format: "65585-65580" or "65580,65581,65582")'
+        help='Process range of URL IDs (format: "65585-65580" or "3897-3890")'
+    )
+    parser.add_argument(
+        '--real-id',
+        type=str,
+        help='Process specific candidate/case by Real ID (new method)'
+    )
+    parser.add_argument(
+        '--real-range',
+        type=str,
+        help='Process range of Real IDs (format: "1044759-1044754" or "13897-13890")'
+    )
+    parser.add_argument(
+        '--id-type',
+        choices=['url', 'real', 'auto'],
+        default='url',
+        help='[DEPRECATED] Use --real-id or --real-range instead for Real IDs'
     )
     parser.add_argument(
         '--log-level',
@@ -834,26 +896,81 @@ def main():
         default='INFO',
         help='Logging level'
     )
+    parser.add_argument(
+        '--analyze-case-pattern',
+        action='store_true',
+        help='Analyze Case ID patterns by collecting URL ID -> Real ID mappings'
+    )
     
     args = parser.parse_args()
     
     # Setup logging
     setup_logging(args.log_level)
     
-    # Run harvester based on type
-    harvester = ERPResumeHarvester(use_selenium=args.selenium)
+    # Validate arguments
+    id_options = [args.id, args.range, args.real_id, args.real_range]
+    specified_options = [opt for opt in id_options if opt]
+    
+    if len(specified_options) > 1:
+        print("Error: Only one of --id, --range, --real-id, --real-range can be specified")
+        return False
+    
+    # Determine processing parameters
+    specific_id = None
+    id_range = None
+    id_type = 'url'  # Default
+    
+    if args.real_id:
+        specific_id = args.real_id
+        id_type = 'real'
+        print(f"🎯 Real ID Mode: Processing {args.type} with Real ID {args.real_id}")
+    elif args.real_range:
+        id_range = args.real_range
+        id_type = 'real'
+        print(f"📊 Real Range Mode: Processing {args.type} with Real ID range {args.real_range}")
+    elif args.id:
+        specific_id = args.id
+        id_type = 'url'
+        print(f"🔗 URL ID Mode: Processing {args.type} with URL ID {args.id}")
+    elif args.range:
+        id_range = args.range
+        id_type = 'url'
+        print(f"📈 URL Range Mode: Processing {args.type} with URL ID range {args.range}")
+    else:
+        # No specific ID/range specified, use existing id_type for backward compatibility
+        id_type = args.id_type
+        if id_type != 'url':
+            print("Warning: --id-type is deprecated. Use --real-id or --real-range for Real IDs")
+    
+    # Handle special modes
+    if args.analyze_case_pattern:
+        if args.type != 'case':
+            print("Error: --analyze-case-pattern can only be used with --type case")
+            return False
+        if not id_range and not specific_id:
+            print("Error: --analyze-case-pattern requires --range, --real-range, --id, or --real-id")
+            return False
+        print("🔍 Case ID Pattern Analysis Mode")
+        print("  Collecting URL ID → Real Case ID mappings...")
+        print("  Look for 'CASE ID MAPPING:' lines in the output")
+        print("-" * 50)
+    
+    # Create harvester and run appropriate method
+    harvester = ERPResumeHarvester(use_selenium=True)
     
     if args.type == 'case':
         success = harvester.harvest_cases(
             start_page=args.page,
-            specific_id=args.id,
-            id_range=args.range
+            specific_id=specific_id,
+            id_range=id_range,
+            id_type=id_type
         )
     else:  # candidate (default)
         success = harvester.harvest_candidates(
             start_page=args.page,
-            specific_id=args.id,
-            id_range=args.range
+            specific_id=specific_id,
+            id_range=id_range,
+            id_type=id_type
         )
     
     sys.exit(0 if success else 1)

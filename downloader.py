@@ -12,7 +12,7 @@ import requests
 from tqdm import tqdm
 
 from config import config
-from file_utils import validate_pdf_file, ensure_file_permissions
+from file_utils import validate_pdf_file, ensure_file_permissions, generate_resume_filename
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class PDFDownloader:
         if save_path.exists():
             file_size_mb = save_path.stat().st_size / (1024 * 1024)
             logger.info(f"Resume already exists for {candidate_info.get('name', 'Unknown')} ({file_size_mb:.2f} MB)")
-            self._record_skip()
+            self._record_skip(candidate_info)
             return True
             
         # Retry logic
@@ -79,6 +79,7 @@ class PDFDownloader:
             
             success = self._download_resume_attempt(url, save_path, candidate_info)
             if success:
+                self._record_success_with_candidate(candidate_info, save_path)
                 return True
                 
             if attempt < self.max_retries:
@@ -86,7 +87,7 @@ class PDFDownloader:
                 time.sleep(self.retry_delay)
                 
         logger.error(f"Failed to download resume for {candidate_info.get('name', 'Unknown')} after {self.max_retries} attempts")
-        self._record_failure()
+        self._record_failure_with_candidate(candidate_info)
         return False
         
     def _download_resume_attempt(self, url: str, save_path: Path, 
@@ -460,9 +461,10 @@ class PDFDownloader:
         """Set current download attempt number"""
         self._current_attempt = attempt
         
-    def _record_skip(self):
+    def _record_skip(self, candidate_info: Dict[str, Any]):
         """Record a skipped download"""
         self.download_stats['skipped'] += 1
+        self.download_stats['skipped_candidates'].append(candidate_info)
         
     def _record_failure(self):
         """Record a failed download"""
@@ -472,3 +474,13 @@ class PDFDownloader:
         """Record a successful download"""
         self.download_stats['successful'] += 1
         self.download_stats['total_size_mb'] += file_size_mb 
+
+    def _record_success_with_candidate(self, candidate_info: Dict[str, Any], save_path: Path):
+        """Record a successful download with candidate information"""
+        self._record_success(save_path.stat().st_size / (1024 * 1024))
+        self.download_stats['successful_candidates'].append(candidate_info)
+        
+    def _record_failure_with_candidate(self, candidate_info: Dict[str, Any]):
+        """Record a failed download with candidate information"""
+        self._record_failure()
+        self.download_stats['failed_candidates'].append(candidate_info) 

@@ -46,6 +46,244 @@ ERPDataHarvester/
 └── logs/             # 로그 파일
 ```
 
+## 🚀 사용 방법 (Usage)
+
+### 🎯 두 가지 ID 방식 지원
+
+이 시스템은 **URL ID**와 **실제 ID** 두 가지 방식으로 작동합니다:
+
+| ID 타입 | Candidate 예시 | Case 예시 | 설명 |
+|---------|---------------|-----------|------|
+| **URL ID** | 65586 | 3897 | ERP URL에 사용되는 ID (기존 방식) |
+| **실제 ID** | 1044760 | 13897 | 실제 데이터베이스 ID (새로운 방식) |
+
+### 📋 기본 명령어 구조
+
+```bash
+python main.py --type [candidate|case] [ID_옵션] [기타_옵션]
+```
+
+## 🔗 방법 1: URL ID 방식 (기존 방식)
+
+### Candidate (후보자) 처리
+
+```bash
+# 단일 후보자 처리 (URL ID)
+python main.py --type candidate --id 65586
+
+# URL ID 범위 처리 
+python main.py --type candidate --range "65585-65580"
+python main.py --type candidate --range "65580,65581,65582"
+
+# 전체 페이지 크롤링
+python main.py --type candidate --page 1
+```
+
+### Case (케이스) 처리
+
+```bash
+# 단일 케이스 처리 (URL ID)
+python main.py --type case --id 3897
+
+# URL ID 범위 처리
+python main.py --type case --range "3897-3890"
+python main.py --type case --range "3890,3891,3892"
+
+# 전체 페이지 크롤링
+python main.py --type case --page 1
+```
+
+## 🎯 방법 2: 실제 ID 방식 (최신 방식)
+
+### Candidate (후보자) 처리
+
+```bash
+# 단일 후보자 처리 (실제 ID)
+python main.py --type candidate --real-id 1044760
+
+# 실제 ID 범위 처리
+python main.py --type candidate --real-range "1044759-1044754"
+python main.py --type candidate --real-range "1044754,1044755,1044756"
+```
+
+### Case (케이스) 처리
+
+```bash
+# 단일 케이스 처리 (실제 ID)
+python main.py --type case --real-id 13897
+
+# 실제 ID 범위 처리
+python main.py --type case --real-range "13897-13890"
+python main.py --type case --real-range "13890,13891,13892"
+```
+
+## 🔧 고급 옵션
+
+### 로깅 레벨 설정
+```bash
+# 상세한 로그 출력
+python main.py --type candidate --real-id 1044760 --log-level DEBUG
+
+# 간단한 로그 출력
+python main.py --type case --id 3897 --log-level WARNING
+```
+
+### Case ID 패턴 분석 (고급 사용자용)
+```bash
+# Case ID 패턴 분석 모드
+python main.py --type case --range "3897-3890" --analyze-case-pattern
+```
+
+## 📊 ID 변환 패턴
+
+### 자동 변환 규칙
+시스템이 자동으로 ID를 변환합니다:
+
+**Candidate ID 변환:**
+```
+실제 ID = URL ID + 979,174
+예시: URL 65586 → Real 1044760
+```
+
+**Case ID 변환:**
+```
+실제 ID = URL ID + 10,000
+예시: URL 3897 → Real 13897
+```
+
+### 사용 팁
+- **URL ID 방식**: 기존 ERP URL에서 보이는 숫자를 그대로 사용
+- **실제 ID 방식**: 데이터베이스에 저장된 실제 ID를 사용
+- **범위 지정**: 큰 숫자에서 작은 숫자 순으로 처리됨
+- **쉼표 구분**: 특정 ID들만 선택적으로 처리 가능
+
+## 💡 명령어 예시 모음
+
+### URL ID 방식 (기존)
+```bash
+# Candidate
+python main.py --type candidate --id 65586
+python main.py --type candidate --range "65590-65585"
+
+# Case  
+python main.py --type case --id 3897
+python main.py --type case --range "3900-3895"
+```
+
+### 실제 ID 방식 (최신)
+```bash
+# Candidate
+python main.py --type candidate --real-id 1044760
+python main.py --type candidate --real-range "1044765-1044760"
+
+# Case
+python main.py --type case --real-id 13897  
+python main.py --type case --real-range "13900-13895"
+```
+
+### 혼합 사용 불가
+```bash
+# ❌ 잘못된 예시 (동시 사용 불가)
+python main.py --type candidate --id 65586 --real-id 1044760
+
+# ✅ 올바른 예시 (하나씩 사용)
+python main.py --type candidate --id 65586
+python main.py --type candidate --real-id 1044760
+```
+
+## 📝 향후 개발 계획
+
+- [ ] MySQL 트리거 기반 실시간 업데이트
+- [ ] Telegram Bot 연동 (명령어 기반 수집)
+- [ ] 스케줄러 구현 (주기적 자동 실행)
+- [ ] Docker 컨테이너화
+- [ ] RESTful API 제공
+- [ ] 중복 검사 강화
+- [ ] 다국어 지원
+
+## ⚠️ 중요 주의사항
+
+### 외부 호스팅 ERP 시스템 사용시
+**이 도구를 외부 업체가 호스팅하는 ERP 시스템에 사용하기 전에 반드시:**
+
+1. **사전 승인 필수**
+   - IT 관리자/담당자 승인
+   - ERP 호스팅 업체 정책 확인
+   - 서비스 약관 검토
+
+2. **법적 검토**
+   - 자동화 접근 허용 여부 확인
+   - 데이터 수집 권한 검토
+   - 개인정보보호 정책 준수
+
+3. **기술적 고려사항**
+   - 운영 환경이 아닌 테스트 환경 사용 권장
+   - 공식 API 연동 방식 우선 검토
+   - 트래픽 제한 및 속도 조절 필수
+
+### 권장 대안
+- **공식 API 사용**: HRcap에서 제공하는 정식 API 활용
+- **내부 시스템**: 자체 호스팅 ERP 시스템에서만 사용
+- **테스트 환경**: 운영 데이터가 아닌 샘플 데이터로 테스트
+
+**⚠️ 무단 사용으로 인한 모든 법적 책임은 사용자에게 있습니다.**
+
+## 🤝 기여하기
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 라이선스
+
+이 프로젝트는 MIT 라이선스 하에 있습니다.
+
+## 🔍 ID 패턴 분석
+
+### Candidate ID 패턴 (✅ 발견됨)
+- **패턴**: `실제 Candidate ID = URL ID + 979,174`
+- **검증됨**: 3개 샘플 100% 일치
+- **사용 가능**: 양방향 변환 지원
+
+```bash
+# 실제 ID로 처리
+python main.py --type candidate --id 1044760 --id-type real
+python main.py --type candidate --range '1044759-1044754' --id-type real
+```
+
+### Case ID 패턴 (❓ 분석 필요)
+- **상태**: 패턴 미발견
+- **분석 방법**: 실제 ERP 데이터 수집 후 패턴 도출
+
+#### Case ID 패턴 분석 가이드
+
+1. **데이터 수집 명령어**:
+```bash
+# Case ID 패턴 분석 모드로 실행
+python main.py --type case --range '3897-3890' --analyze-case-pattern --log-level INFO
+
+# 또는 개별 Case 분석
+python main.py --type case --id 3897 --analyze-case-pattern --log-level INFO
+```
+
+2. **로그에서 패턴 찾기**:
+```
+CASE ID MAPPING: URL 3897 → Real 13897 (차이: 10000)
+CASE ID MAPPING: URL 3896 → Real 13896 (차이: 10000)  
+CASE ID MAPPING: URL 3895 → Real 13895 (차이: 10000)
+```
+
+3. **패턴 확인 요소**:
+   - 충분한 샘플 수집 (최소 3-5개)
+   - 일관된 차이값 확인
+   - 예외 사례 검토
+
+4. **패턴 발견 시 구현**:
+   - `file_utils.py`의 `convert_case_id()` 함수 업데이트
+   - Case ID 양방향 변환 기능 활성화
+
 ## 🚀 시작하기
 
 ### 1. 환경 설정
@@ -68,63 +306,6 @@ pip install -r requirements.txt
 
 ```bash
 # .env 파일을 편집하여 ERP 접속 정보 입력
-```
-
-### 3. 실행
-
-#### 후보자 데이터 수집
-
-```bash
-# 전체 후보자 수집
-python main.py --type candidate
-
-# Selenium 모드로 실행 (JavaScript 렌더링이 필요한 경우)
-python main.py --type candidate --selenium
-
-# 특정 페이지부터 시작
-python main.py --type candidate --page 5
-
-# 특정 후보자만 처리
-# URL 번호로 접근하지만, 실제 candidate_id로 저장
-python main.py --type candidate --id 65586
-python main.py --type candidate --id 65607
-
-# 범위로 다운로드
-python main.py --type candidate --range "65607-65606"
-
-# 개별 ID로 다운로드
-python main.py --type candidate --range "65580,65581,65582,65583,65584,65585"
-```
-
-#### 케이스 데이터 수집
-
-```bash
-# 전체 케이스 수집
-python main.py --type case
-
-# 특정 케이스만 처리
-# URL 번호로 접근하지만, 실제 Case No로 저장
-python main.py --type case --id 3897
-
-# 케이스 범위로 다운로드
-python main.py --type case --range "3897-3900"
-
-# 개별 케이스 ID로 다운로드
-python main.py --type case --range "3897,3898,3899"
-
-# 특정 페이지부터 케이스 수집
-python main.py --type case --page 2
-```
-
-#### 공통 옵션
-
-```bash
-# 디버그 모드
-python main.py --type candidate --log-level DEBUG
-python main.py --type case --log-level DEBUG
-
-# 기본값 (후보자 수집)
-python main.py  # --type candidate와 동일
 ```
 
 ## ⚙️ 환경변수 설정
@@ -205,52 +386,3 @@ harvester.harvest_candidates(start_page=10, end_page=20)
 if candidate_info.status == 'Active':
     process_candidate(candidate_info)
 ```
-
-## 📝 향후 개발 계획
-
-- [ ] MySQL 트리거 기반 실시간 업데이트
-- [ ] Telegram Bot 연동 (명령어 기반 수집)
-- [ ] 스케줄러 구현 (주기적 자동 실행)
-- [ ] Docker 컨테이너화
-- [ ] RESTful API 제공
-- [ ] 중복 검사 강화
-- [ ] 다국어 지원
-
-## ⚠️ 중요 주의사항
-
-### 외부 호스팅 ERP 시스템 사용시
-**이 도구를 외부 업체가 호스팅하는 ERP 시스템에 사용하기 전에 반드시:**
-
-1. **사전 승인 필수**
-   - IT 관리자/담당자 승인
-   - ERP 호스팅 업체 정책 확인
-   - 서비스 약관 검토
-
-2. **법적 검토**
-   - 자동화 접근 허용 여부 확인
-   - 데이터 수집 권한 검토
-   - 개인정보보호 정책 준수
-
-3. **기술적 고려사항**
-   - 운영 환경이 아닌 테스트 환경 사용 권장
-   - 공식 API 연동 방식 우선 검토
-   - 트래픽 제한 및 속도 조절 필수
-
-### 권장 대안
-- **공식 API 사용**: HRcap에서 제공하는 정식 API 활용
-- **내부 시스템**: 자체 호스팅 ERP 시스템에서만 사용
-- **테스트 환경**: 운영 데이터가 아닌 샘플 데이터로 테스트
-
-**⚠️ 무단 사용으로 인한 모든 법적 책임은 사용자에게 있습니다.**
-
-## 🤝 기여하기
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 라이선스
-
-이 프로젝트는 MIT 라이선스 하에 있습니다.

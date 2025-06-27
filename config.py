@@ -31,10 +31,11 @@ class Config:
         self.login_url = '/mem/dispLogin'
         
         # Paths Configuration
-        self.resumes_dir = Path(os.getenv('RESUMES_DIR', './resume'))
-        self.metadata_dir = Path(os.getenv('METADATA_DIR', './metadata'))
-        self.results_dir = Path(os.getenv('RESULTS_DIR', './results'))
-        self.logs_dir = Path(os.getenv('LOGS_DIR', './logs'))
+        self.base_dir = Path(os.getenv('BASE_DIR', './Harvested'))
+        self.resumes_dir = self.base_dir / 'Resume'
+        self.metadata_dir = self.base_dir / 'metadata'
+        self.results_dir = self.base_dir / 'results'
+        self.logs_dir = self.base_dir / 'logs'
         
         # Scraping Configuration
         self.page_load_timeout = self._get_int_env('PAGE_LOAD_TIMEOUT', 30)
@@ -50,8 +51,8 @@ class Config:
         self.items_per_page = self._get_int_env('ITEMS_PER_PAGE', 20)
         self.max_pages = self._get_int_env('MAX_PAGES', 2)
         
-        # File naming
-        self.file_name_pattern = os.getenv('FILE_NAME_PATTERN', '{name}_{id}_resume')
+        # File naming - Updated to bracket format
+        self.file_name_pattern = os.getenv('FILE_NAME_PATTERN', '[Resume-{id}] {name}')
         
         # Logging
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
@@ -176,10 +177,12 @@ class Config:
             now = datetime.now()
             return self.resumes_dir / str(now.year) / f"{now.month:02d}" / filename
             
-    def get_metadata_path(self, filename: str) -> Path:
+    def get_metadata_path(self, filename: str, file_type: str = 'meta') -> Path:
         """Get the full path for a metadata file"""
-        # Change extension from .pdf to .meta.json
-        meta_filename = filename.replace('.pdf', '.meta.json')
+        from file_utils import generate_metadata_filename
+        
+        # Generate metadata filename from base filename
+        meta_filename = generate_metadata_filename(filename, file_type)
         return self.metadata_dir / meta_filename
         
     def __repr__(self):

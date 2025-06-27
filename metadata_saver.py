@@ -10,6 +10,14 @@ from datetime import datetime
 import pandas as pd
 
 from config import config
+from file_utils import (
+    sanitize_filename, 
+    generate_resume_filename,
+    generate_case_filename, 
+    generate_metadata_filename,
+    extract_date_parts,
+    create_directory_structure
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +35,7 @@ class MetadataSaver:
         """
         self.metadata_dir = Path(metadata_dir)
         self.results_dir = Path(results_dir)
-        self.case_dir = Path("case")  # New case directory
+        self.case_dir = self.metadata_dir.parent / 'case'  # Harvested/case
         
         # Create metadata subdirectories
         self.metadata_case_dir = self.metadata_dir / "case"
@@ -36,7 +44,7 @@ class MetadataSaver:
         # Create directories
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        self.case_dir.mkdir(parents=True, exist_ok=True)
+        (self.metadata_dir.parent / 'case').mkdir(parents=True, exist_ok=True)
         self.metadata_case_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_resume_dir.mkdir(parents=True, exist_ok=True)
         
@@ -135,16 +143,13 @@ class MetadataSaver:
             True if successful
         """
         try:
-            # Generate metadata filename
+            # Generate metadata filename using new bracket format
             candidate_id = candidate_info.get('candidate_id', 'unknown')
             name = candidate_info.get('name', 'unknown')
             
-            # Use same naming pattern as PDF
-            filename = config.file_name_pattern.format(
-                name=self._sanitize_name(name),
-                id=candidate_id
-            )
-            metadata_filename = f"{filename}.meta.json"
+            # Use new bracket-based naming
+            resume_filename = generate_resume_filename(name, candidate_id, 'pdf')
+            metadata_filename = generate_metadata_filename(resume_filename, 'meta')
             metadata_path = self.metadata_resume_dir / metadata_filename
             
             # Prepare metadata
@@ -188,16 +193,14 @@ class MetadataSaver:
             True if successful
         """
         try:
-            # Generate metadata filename
+            # Generate metadata filename using new bracket format
             case_id = case_info.get('jobcase_id', 'unknown')
             job_title = case_info.get('job_title', 'unknown')
             company_name = case_info.get('company_name', 'unknown')
             
-            # Use new naming pattern to match JD files: clientName_PositionTitle_caseID.case.meta.json
-            sanitized_company = self._sanitize_name(company_name)
-            sanitized_title = self._sanitize_name(job_title)
-            filename = f"{sanitized_company}_{sanitized_title}_{case_id}"
-            metadata_filename = f"{filename}.case.meta.json"
+            # Use new bracket-based naming: [Case-ID] Company - Position.meta.json
+            case_filename = generate_case_filename(company_name, job_title, case_id, 'json')
+            metadata_filename = generate_metadata_filename(case_filename, 'meta')
             metadata_path = self.metadata_case_dir / metadata_filename
             
             # Prepare metadata
@@ -234,7 +237,7 @@ class MetadataSaver:
             
     def save_case_jd_info(self, case_info: Dict[str, Any]) -> bool:
         """
-        Save detailed case JD information to case folder with new naming pattern
+        Save detailed case JD information to case folder with new bracket naming pattern
         
         Args:
             case_info: Complete case information dictionary with JD details
@@ -248,10 +251,8 @@ class MetadataSaver:
             job_title = case_info.get('job_title', 'unknown')
             company_name = case_info.get('company_name', 'unknown')
             
-            # Create filename: clientName_PositionTitle_caseID.json
-            sanitized_company = self._sanitize_name(company_name)
-            sanitized_title = self._sanitize_name(job_title)
-            filename = f"{sanitized_company}_{sanitized_title}_{case_id}.json"
+            # Use new bracket-based naming: [Case-ID] Company - Position.json
+            filename = generate_case_filename(company_name, job_title, case_id, 'json')
             case_path = self.case_dir / filename
             
             # Prepare complete JD data
@@ -624,17 +625,29 @@ class MetadataSaver:
                     f.write(f"Completed: {self.command_info.get('end_time')}\n")
                 f.write("\n")
                 
+                # Determine data type for appropriate terminology
+                data_type = self.command_info.get('data_type', 'candidate').lower()
+                is_case = data_type == 'case'
+                
                 # Processing Statistics Summary
                 f.write("📊 Processing Statistics:\n")
                 f.write("-" * 30 + "\n")
-                f.write(f"Total candidates processed: {download_stats.get('total', 0)}\n")
-                f.write(f"Successful downloads: {download_stats.get('successful', 0)}\n")
-                f.write(f"Failed downloads: {download_stats.get('failed', 0)}\n")
-                f.write(f"Skipped (existing): {download_stats.get('skipped', 0)}\n")
+                if is_case:
+                    f.write(f"Total cases processed: {download_stats.get('total', 0)}\n")
+                    f.write(f"Successful cases: {download_stats.get('successful', 0)}\n")
+                    f.write(f"Failed cases: {download_stats.get('failed', 0)}\n")
+                    f.write(f"Skipped (existing): {download_stats.get('skipped', 0)}\n")
+                else:
+                    f.write(f"Total candidates processed: {download_stats.get('total', 0)}\n")
+                    f.write(f"Successful downloads: {download_stats.get('successful', 0)}\n")
+                    f.write(f"Failed downloads: {download_stats.get('failed', 0)}\n")
+                    f.write(f"Skipped (existing): {download_stats.get('skipped', 0)}\n")
                 f.write(f"Processing errors: {len(self.processing_errors)}\n")
                 f.write(f"Warnings: {len(self.warnings)}\n")
                 f.write(f"Success rate: {download_stats.get('success_rate', 0):.1f}%\n")
-                f.write(f"Total size downloaded: {download_stats.get('total_size_mb', 0):.2f} MB\n\n")
+                if not is_case:
+                    f.write(f"Total size downloaded: {download_stats.get('total_size_mb', 0):.2f} MB\n")
+                f.write("\n")
                 
                 # Processing Errors Section
                 if self.processing_errors:
@@ -642,7 +655,10 @@ class MetadataSaver:
                     f.write("=" * 50 + "\n")
                     for i, error in enumerate(self.processing_errors, 1):
                         f.write(f"{i:3d}. ERROR: {error['error_type']}\n")
-                        f.write(f"     Candidate ID: {error['candidate_id']}\n")
+                        if is_case:
+                            f.write(f"     Case ID: {error.get('candidate_id', 'N/A')}\n")
+                        else:
+                            f.write(f"     Candidate ID: {error.get('candidate_id', 'N/A')}\n")
                         f.write(f"     Name: {error['name']}\n")
                         f.write(f"     Detail URL: {error['detail_url']}\n")
                         f.write(f"     Error Message: {error['error_message']}\n")
@@ -656,7 +672,10 @@ class MetadataSaver:
                     f.write("=" * 50 + "\n")
                     for i, warning in enumerate(self.warnings, 1):
                         f.write(f"{i:3d}. WARNING: {warning['warning_type']}\n")
-                        f.write(f"     Candidate ID: {warning['candidate_id']}\n")
+                        if is_case:
+                            f.write(f"     Case ID: {warning.get('candidate_id', 'N/A')}\n")
+                        else:
+                            f.write(f"     Candidate ID: {warning.get('candidate_id', 'N/A')}\n")
                         f.write(f"     Name: {warning['name']}\n")
                         f.write(f"     Detail URL: {warning['detail_url']}\n")
                         f.write(f"     Warning Message: {warning['warning_message']}\n")
@@ -664,62 +683,77 @@ class MetadataSaver:
                         f.write("-" * 50 + "\n")
                     f.write("\n")
                 
-                # Successfully Downloaded Candidates
+                # Successfully Processed Items
                 successful_list = download_stats.get('successful_candidates', [])
                 if successful_list:
-                    f.write("✅ Successfully Downloaded Candidates:\n")
+                    if is_case:
+                        f.write("✅ Successfully Processed Cases:\n")
+                    else:
+                        f.write("✅ Successfully Downloaded Candidates:\n")
                     f.write("-" * 40 + "\n")
-                    for i, candidate in enumerate(successful_list, 1):
-                        candidate_id = candidate.get('candidate_id', 'N/A')
-                        name = candidate.get('name', 'Unknown')
-                        size_mb = candidate.get('file_size_mb', 0)
-                        f.write(f"{i:3d}. ID: {candidate_id} | {name} | {size_mb:.2f} MB\n")
+                    for i, item in enumerate(successful_list, 1):
+                        item_id = item.get('candidate_id', 'N/A')
+                        name = item.get('name', 'Unknown')
+                        if is_case:
+                            f.write(f"{i:3d}. ID: {item_id} | {name}\n")
+                        else:
+                            size_mb = item.get('file_size_mb', 0)
+                            f.write(f"{i:3d}. ID: {item_id} | {name} | {size_mb:.2f} MB\n")
                     f.write("\n")
                 
-                # Skipped Candidates
+                # Skipped Items
                 skipped_list = download_stats.get('skipped_candidates', [])
                 if skipped_list:
-                    f.write("⏭️  Skipped Candidates (Already Downloaded):\n")
+                    if is_case:
+                        f.write("⏭️  Skipped Cases (Already Processed):\n")
+                    else:
+                        f.write("⏭️  Skipped Candidates (Already Downloaded):\n")
                     f.write("-" * 40 + "\n")
-                    for i, candidate in enumerate(skipped_list, 1):
-                        candidate_id = candidate.get('candidate_id', 'N/A')
-                        name = candidate.get('name', 'Unknown')
-                        f.write(f"{i:3d}. ID: {candidate_id} | {name}\n")
+                    for i, item in enumerate(skipped_list, 1):
+                        item_id = item.get('candidate_id', 'N/A')
+                        name = item.get('name', 'Unknown')
+                        f.write(f"{i:3d}. ID: {item_id} | {name}\n")
                     f.write("\n")
                 
-                # Failed Downloads from Downloader
+                # Failed Items
                 failed_list = download_stats.get('failed_candidates', [])
                 if failed_list:
-                    f.write("❌ Failed Downloads (Downloader Issues):\n")
+                    if is_case:
+                        f.write("❌ Failed Cases:\n")
+                    else:
+                        f.write("❌ Failed Downloads (Downloader Issues):\n")
                     f.write("-" * 45 + "\n")
-                    for i, candidate in enumerate(failed_list, 1):
-                        candidate_id = candidate.get('candidate_id', 'N/A')
-                        name = candidate.get('name', 'Unknown')
-                        error = candidate.get('error', 'Unknown error')
-                        detail_url = candidate.get('detail_url', 'N/A')
-                        f.write(f"{i:3d}. ID: {candidate_id} | {name}\n")
+                    for i, item in enumerate(failed_list, 1):
+                        item_id = item.get('candidate_id', 'N/A')
+                        name = item.get('name', 'Unknown')
+                        error = item.get('error', 'Unknown error')
+                        detail_url = item.get('detail_url', 'N/A')
+                        f.write(f"{i:3d}. ID: {item_id} | {name}\n")
                         f.write(f"     URL: {detail_url}\n")
                         f.write(f"     Error: {error}\n")
                         f.write("-" * 45 + "\n")
                     f.write("\n")
                 
                 # Summary of All Processed IDs
-                all_candidate_ids = []
-                all_candidate_ids.extend([c.get('candidate_id') for c in successful_list if c.get('candidate_id')])
-                all_candidate_ids.extend([c.get('candidate_id') for c in skipped_list if c.get('candidate_id')])
-                all_candidate_ids.extend([c.get('candidate_id') for c in failed_list if c.get('candidate_id')])
-                all_candidate_ids.extend([e.get('candidate_id') for e in self.processing_errors if e.get('candidate_id')])
+                all_ids = []
+                all_ids.extend([c.get('candidate_id') for c in successful_list if c.get('candidate_id')])
+                all_ids.extend([c.get('candidate_id') for c in skipped_list if c.get('candidate_id')])
+                all_ids.extend([c.get('candidate_id') for c in failed_list if c.get('candidate_id')])
+                all_ids.extend([e.get('candidate_id') for e in self.processing_errors if e.get('candidate_id')])
                 
                 # Remove duplicates while preserving order
                 unique_ids = []
                 seen = set()
-                for id in all_candidate_ids:
+                for id in all_ids:
                     if id and id not in seen:
                         unique_ids.append(id)
                         seen.add(id)
                 
                 if unique_ids:
-                    f.write(f"📋 All Processed Candidate IDs ({len(unique_ids)} total):\n")
+                    if is_case:
+                        f.write(f"📋 All Processed Case IDs ({len(unique_ids)} total):\n")
+                    else:
+                        f.write(f"📋 All Processed Candidate IDs ({len(unique_ids)} total):\n")
                     f.write("-" * 40 + "\n")
                     # Sort IDs numerically if possible
                     try:
@@ -744,8 +778,12 @@ class MetadataSaver:
                         f.write("• Review warnings for data quality issues\n")
                         f.write("• Consider updating scraping logic for missing data\n")
                     if failed_list:
-                        f.write("• Retry failed downloads with increased timeout\n")
-                        f.write("• Check file format compatibility\n")
+                        if is_case:
+                            f.write("• Retry failed cases with increased timeout\n")
+                            f.write("• Check case access permissions\n")
+                        else:
+                            f.write("• Retry failed downloads with increased timeout\n")
+                            f.write("• Check file format compatibility\n")
                         
             logger.info(f"Generated comprehensive processing report: {report_path}")
             return report_path
