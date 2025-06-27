@@ -59,6 +59,56 @@ class JobCaseInfo:
     client_id: Optional[str] = None  # 245
     candidate_ids: Optional[List[str]] = None  # Connected candidate IDs
     
+    # Contract Information
+    contract_type: Optional[str] = None  # Contingency
+    fee_type: Optional[str] = None  # Gross
+    bonus_types: Optional[str] = None  # Sign on Bonus, Performance Bonus, etc.
+    fee_rate: Optional[str] = None  # Flat Rate 20%
+    guarantee_days: Optional[str] = None  # Base 90 days
+    candidate_ownership_period: Optional[str] = None  # 1 Year
+    payment_due_days: Optional[str] = None  # 15
+    contract_expiration_date: Optional[str] = None  # No
+    signer_name: Optional[str] = None  # Jihyun Kwon
+    signer_position_level: Optional[str] = None  # Manager / Sr. Manager
+    signed_date: Optional[str] = None  # 01/12/2016
+    
+    # Position Details  
+    job_category: Optional[str] = None  # Accounting > Accounting
+    position_level: Optional[str] = None  # Manager / Sr. Manager
+    responsibilities: Optional[str] = None  # supervising overall accounting matters
+    responsibilities_input_tag: Optional[str] = None  # accounting manager
+    responsibilities_file_attach: Optional[str] = None
+    job_location: Optional[str] = None  # East rutherford, New Jersey, USA
+    business_trip_frequency: Optional[str] = None  # 0 ~ 10%
+    targeted_due_date: Optional[str] = None  # 06/30/2025
+    
+    # Job Order Information
+    reason_of_hiring: Optional[str] = None  # New Position
+    job_order_inquirer: Optional[str] = None  # Jia Kwon, COO
+    job_order_background: Optional[str] = None  # need someone to supervise
+    desire_spec: Optional[str] = None  # enough experience in every aspects
+    strategy_approach: Optional[str] = None  # contact southpole accounting candidates
+    important_notes: Optional[str] = None  # find someone very hungry
+    additional_client_info: Optional[str] = None
+    other_info: Optional[str] = None
+    
+    # Requirements
+    education_level: Optional[str] = None  # Bachelors
+    major: Optional[str] = None  # Accounting/Auditing
+    language_ability: Optional[str] = None  # Bilingual
+    select_languages: Optional[Dict[str, str]] = None  # English: Min 4 / Max 5
+    experience_range: Optional[str] = None  # Min 10 year / Max 25 year
+    relocation_supported: Optional[str] = None
+    
+    # Benefits
+    insurance_info: Optional[str] = None
+    k401_info: Optional[str] = None  # Company Support, Start Date, %
+    overtime_pay: Optional[str] = None  # No
+    personal_sick_days: Optional[str] = None  # 0 days
+    vacation_info: Optional[Dict[str, str]] = None  # First Year, Annual Increment, Max
+    other_benefits: Optional[str] = None
+    benefits_file: Optional[str] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return asdict(self)
@@ -1106,6 +1156,177 @@ class ERPScraper:
         except Exception as e:
             logger.debug(f"Failed to extract client ID: {e}")
             
+        # Extract detailed JD information
+        try:
+            # Contract Information
+            contract_fields = {
+                'contract_type': 'Contract Type',
+                'fee_type': 'Fee Type', 
+                'bonus_types': 'Bonus',
+                'fee_rate': 'Fee Rate',
+                'guarantee_days': 'Guarantee Days',
+                'candidate_ownership_period': 'Candidate Ownership Period',
+                'payment_due_days': 'Payment Due Days',
+                'contract_expiration_date': 'Contract Expiration Date',
+                'signer_name': 'Signer Name',
+                'signer_position_level': 'Signer Position Level',
+                'signed_date': 'Signed Date'
+            }
+            
+            for field_key, field_label in contract_fields.items():
+                try:
+                    th = soup.find('th', string=field_label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                info[field_key] = value
+                                logger.debug(f"Found {field_label}: {value}")
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_label}: {e}")
+                    
+            # Position Details
+            position_fields = {
+                'job_category': 'Job Category',
+                'position_level': 'Position Level',
+                'responsibilities': 'Responsibilities', 
+                'responsibilities_input_tag': 'Responsibilities Input Tag',
+                'responsibilities_file_attach': 'Responsibilities File Attach',
+                'job_location': 'Job Location',
+                'business_trip_frequency': 'Business Trip Frequency',
+                'targeted_due_date': 'Targeted Due Date'
+            }
+            
+            for field_key, field_label in position_fields.items():
+                try:
+                    th = soup.find('th', string=field_label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                info[field_key] = value
+                                logger.debug(f"Found {field_label}: {value}")
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_label}: {e}")
+                    
+            # Job Order Information
+            job_order_fields = {
+                'reason_of_hiring': 'Reason of Hiring',
+                'job_order_inquirer': 'Job Order Inquirer',
+                'job_order_background': 'Job Order Background',
+                'desire_spec': 'Desire Spec',
+                'strategy_approach': 'Strategy Approach',
+                'important_notes': 'Important Notes',
+                'additional_client_info': 'Additional Client Info',
+                'other_info': 'Other'
+            }
+            
+            for field_key, field_label in job_order_fields.items():
+                try:
+                    th = soup.find('th', string=field_label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                info[field_key] = value
+                                logger.debug(f"Found {field_label}: {value}")
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_label}: {e}")
+                    
+            # Requirements Information
+            requirements_fields = {
+                'education_level': 'Education Level',
+                'major': 'Major',
+                'language_ability': 'Language Ability',
+                'experience_range': 'Experience',
+                'relocation_supported': 'Relocation Supported'
+            }
+            
+            for field_key, field_label in requirements_fields.items():
+                try:
+                    th = soup.find('th', string=field_label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                info[field_key] = value
+                                logger.debug(f"Found {field_label}: {value}")
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_label}: {e}")
+                    
+            # Language Details (complex structure)
+            try:
+                select_languages = {}
+                # Look for language entries like "English Language Level : Min 4 / Max 5"
+                lang_elements = soup.find_all(text=re.compile(r'Language Level\s*:', re.I))
+                for lang_text in lang_elements:
+                    if isinstance(lang_text, str):
+                        # Extract language name and levels
+                        lang_match = re.search(r'(\w+)\s+Language Level\s*:\s*Min\s*(\d+)\s*/\s*Max\s*(\d+)', lang_text, re.I)
+                        if lang_match:
+                            lang_name, min_level, max_level = lang_match.groups()
+                            select_languages[lang_name] = f"Min {min_level} / Max {max_level}"
+                            logger.debug(f"Found language: {lang_name} = Min {min_level} / Max {max_level}")
+                            
+                if select_languages:
+                    info['select_languages'] = select_languages
+            except Exception as e:
+                logger.debug(f"Failed to extract language details: {e}")
+                
+            # Benefits Information
+            benefits_fields = {
+                'insurance_info': 'Insurance',
+                'k401_info': '401K',
+                'overtime_pay': 'Overtime Pay',
+                'personal_sick_days': 'Personal/ Sick Day',
+                'other_benefits': 'Other Benefits',
+                'benefits_file': 'Benefits File'
+            }
+            
+            for field_key, field_label in benefits_fields.items():
+                try:
+                    th = soup.find('th', string=field_label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                info[field_key] = value
+                                logger.debug(f"Found {field_label}: {value}")
+                except Exception as e:
+                    logger.debug(f"Failed to extract {field_label}: {e}")
+                    
+            # Vacation Information (complex structure)
+            try:
+                vacation_info = {}
+                vacation_fields = {
+                    'first_year': 'First Year Vacation Days',
+                    'annual_increment': 'Anuual Increment', 
+                    'max_days': 'Max'
+                }
+                
+                for key, label in vacation_fields.items():
+                    th = soup.find('th', string=label)
+                    if th:
+                        td = th.find_next_sibling('td')
+                        if td:
+                            value = td.get_text(strip=True)
+                            if value and value.lower() not in ['', '-', 'n/a', 'none']:
+                                vacation_info[key] = value
+                                
+                if vacation_info:
+                    info['vacation_info'] = vacation_info
+                    logger.debug(f"Found vacation info: {vacation_info}")
+            except Exception as e:
+                logger.debug(f"Failed to extract vacation info: {e}")
+                
+        except Exception as e:
+            logger.warning(f"Error extracting detailed JD information: {e}")
+        
         # Set URL ID for reference
         info['url_id'] = jobcase_id  # Store original URL ID for reference
         

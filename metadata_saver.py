@@ -22,21 +22,23 @@ class MetadataSaver:
         Initialize metadata saver
         
         Args:
-            metadata_dir: Directory for individual metadata files
+            metadata_dir: Directory for metadata files
             results_dir: Directory for consolidated results
         """
-        self.metadata_dir = metadata_dir
-        self.results_dir = results_dir
+        self.metadata_dir = Path(metadata_dir)
+        self.results_dir = Path(results_dir)
+        self.case_dir = Path("case")  # New case directory
         
-        # Ensure directories exist
+        # Create directories
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.case_dir.mkdir(parents=True, exist_ok=True)
         
-        # Paths for consolidated files
-        self.candidates_json_path = self.results_dir / 'candidates.json'
-        self.candidates_csv_path = self.results_dir / 'candidates.csv'
-        self.cases_json_path = self.results_dir / 'cases.json'
-        self.cases_csv_path = self.results_dir / 'cases.csv'
+        # Define file paths
+        self.candidates_json_path = self.results_dir / "candidates.json"
+        self.candidates_csv_path = self.results_dir / "candidates.csv"
+        self.cases_json_path = self.results_dir / "cases.json"
+        self.cases_csv_path = self.results_dir / "cases.csv"
         
     def save_candidate_metadata(self, candidate_info: Dict[str, Any], 
                                pdf_path: Optional[Path] = None) -> bool:
@@ -109,8 +111,10 @@ class MetadataSaver:
             job_title = case_info.get('job_title', 'unknown')
             company_name = case_info.get('company_name', 'unknown')
             
-            # Use case naming pattern
-            filename = f"{self._sanitize_name(company_name)}_{case_id}_{self._sanitize_name(job_title)}"
+            # Use new naming pattern to match JD files: clientName_PositionTitle_caseID.case.meta.json
+            sanitized_company = self._sanitize_name(company_name)
+            sanitized_title = self._sanitize_name(job_title)
+            filename = f"{sanitized_company}_{sanitized_title}_{case_id}"
             metadata_filename = f"{filename}.case.meta.json"
             metadata_path = self.metadata_dir / metadata_filename
             
@@ -144,6 +148,126 @@ class MetadataSaver:
             
         except Exception as e:
             logger.error(f"Error saving case metadata for {case_id}: {e}")
+            return False
+            
+    def save_case_jd_info(self, case_info: Dict[str, Any]) -> bool:
+        """
+        Save detailed case JD information to case folder with new naming pattern
+        
+        Args:
+            case_info: Complete case information dictionary with JD details
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Extract info for filename
+            case_id = case_info.get('jobcase_id', 'unknown')
+            job_title = case_info.get('job_title', 'unknown')
+            company_name = case_info.get('company_name', 'unknown')
+            
+            # Create filename: clientName_PositionTitle_caseID.json
+            sanitized_company = self._sanitize_name(company_name)
+            sanitized_title = self._sanitize_name(job_title)
+            filename = f"{sanitized_company}_{sanitized_title}_{case_id}.json"
+            case_path = self.case_dir / filename
+            
+            # Prepare complete JD data
+            jd_data = {
+                # Basic Information
+                'case_id': case_id,
+                'position_title': job_title,
+                'client_name': company_name,
+                'case_status': case_info.get('job_status'),
+                'created_date': case_info.get('created_date'),
+                'updated_date': case_info.get('updated_date'),
+                'assigned_team': case_info.get('assigned_team'),
+                'drafter': case_info.get('drafter'),
+                'client_id': case_info.get('client_id'),
+                'connected_candidates': case_info.get('candidate_ids', []),
+                'total_candidates': len(case_info.get('candidate_ids', [])),
+                
+                # Contract Information
+                'contract_info': {
+                    'contract_type': case_info.get('contract_type'),
+                    'fee_type': case_info.get('fee_type'),
+                    'bonus_types': case_info.get('bonus_types'),
+                    'fee_rate': case_info.get('fee_rate'),
+                    'guarantee_days': case_info.get('guarantee_days'),
+                    'candidate_ownership_period': case_info.get('candidate_ownership_period'),
+                    'payment_due_days': case_info.get('payment_due_days'),
+                    'contract_expiration_date': case_info.get('contract_expiration_date'),
+                    'signer_name': case_info.get('signer_name'),
+                    'signer_position_level': case_info.get('signer_position_level'),
+                    'signed_date': case_info.get('signed_date')
+                },
+                
+                # Position Information
+                'position_info': {
+                    'job_category': case_info.get('job_category'),
+                    'position_level': case_info.get('position_level'),
+                    'employment_type': case_info.get('employment_type'),
+                    'salary_range': case_info.get('salary_range'),
+                    'job_location': case_info.get('job_location'),
+                    'business_trip_frequency': case_info.get('business_trip_frequency'),
+                    'targeted_due_date': case_info.get('targeted_due_date'),
+                    'responsibilities': case_info.get('responsibilities'),
+                    'responsibilities_input_tag': case_info.get('responsibilities_input_tag'),
+                    'responsibilities_file_attach': case_info.get('responsibilities_file_attach')
+                },
+                
+                # Job Order Information
+                'job_order_info': {
+                    'reason_of_hiring': case_info.get('reason_of_hiring'),
+                    'job_order_inquirer': case_info.get('job_order_inquirer'),
+                    'job_order_background': case_info.get('job_order_background'),
+                    'desire_spec': case_info.get('desire_spec'),
+                    'strategy_approach': case_info.get('strategy_approach'),
+                    'important_notes': case_info.get('important_notes'),
+                    'additional_client_info': case_info.get('additional_client_info'),
+                    'other_info': case_info.get('other_info')
+                },
+                
+                # Requirements Information
+                'requirements_info': {
+                    'education_level': case_info.get('education_level'),
+                    'major': case_info.get('major'),
+                    'language_ability': case_info.get('language_ability'),
+                    'select_languages': case_info.get('select_languages', {}),
+                    'experience_range': case_info.get('experience_range'),
+                    'relocation_supported': case_info.get('relocation_supported')
+                },
+                
+                # Benefits Information
+                'benefits_info': {
+                    'insurance_info': case_info.get('insurance_info'),
+                    'k401_info': case_info.get('k401_info'),
+                    'overtime_pay': case_info.get('overtime_pay'),
+                    'personal_sick_days': case_info.get('personal_sick_days'),
+                    'vacation_info': case_info.get('vacation_info', {}),
+                    'other_benefits': case_info.get('other_benefits'),
+                    'benefits_file': case_info.get('benefits_file')
+                },
+                
+                # Metadata
+                'metadata': {
+                    'detail_url': case_info.get('detail_url'),
+                    'url_id': case_info.get('url_id'),
+                    'scraped_timestamp': datetime.now().isoformat(),
+                    'file_created': datetime.now().isoformat()
+                }
+            }
+            
+            # Save to JSON file in case folder
+            with open(case_path, 'w', encoding='utf-8') as f:
+                json.dump(jd_data, f, ensure_ascii=False, indent=2)
+                
+            logger.info(f"Saved case JD info to {case_path}")
+            logger.debug(f"Case JD file: {filename}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving case JD info for {case_id}: {e}")
             return False
             
     def save_consolidated_results(self, all_data: List[Dict[str, Any]], 

@@ -34,6 +34,39 @@ ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수
 
 ## 📝 주요 업데이트 (Major Updates)
 
+### 2025-01-02: 케이스 JD 상세 정보 수집 시스템 구현 완료 ✅
+**주요 성과:**
+- **JD 정보 완전 추출**: 케이스 페이지의 모든 상세 JD 정보 수집 구현
+  - Contract 정보: Contract Type, Fee Type, Bonus, Fee Rate, Guarantee Days 등
+  - Position 정보: Job Category, Position Level, Responsibilities, Job Location 등  
+  - Job Order 정보: Reason of Hiring, Job Order Inquirer, Desire Spec 등
+  - Requirements 정보: Education Level, Major, Language Ability, Experience 등
+  - Benefits 정보: Insurance, 401K, Overtime Pay, Vacation 등
+- **새로운 저장 시스템**: `clientName_PositionTitle_caseID.json` 형식으로 `case/` 폴더에 저장
+- **JobCaseInfo 데이터클래스 확장**: 모든 JD 필드 타입 정의 및 Optional 처리
+- **듀얼 저장 지원**: 기존 metadata 폴더 + 새로운 case 폴더 동시 저장
+
+**구현된 기능:**
+- 상세 JD 파싱: 모든 테이블 필드 자동 추출 (Contract, Position, Job Order, Requirements, Benefits)
+- 복합 구조 처리: Language 능력 레벨, Vacation 정보 등 nested 데이터 파싱
+- 에러 처리: 필드별 개별 에러 처리로 부분 실패시에도 안정적 작동
+- 파일명 정규화: 안전한 파일명 생성 및 특수문자 처리
+
+**기술적 특징:**
+- 다중 패턴 매칭으로 필드 추출 안정성 보장
+- 구조화된 JSON 출력 (기본정보, contract_info, position_info 등 섹션별 분류)
+- 기존 케이스 기능과 완전 호환성 유지
+- 로깅 강화로 추출 상태 실시간 확인 가능
+
+**사용법:**
+```bash
+# 특정 케이스 JD 정보 수집
+python main.py --type case --id 3897
+
+# 케이스 범위 JD 정보 수집  
+python main.py --type case --range "3897-3895"
+```
+
 ### 2025-06-26: JobCase 기능 완전 구현 및 실제 ID 추출 완료 ✅
 **주요 성과:**
 - **실제 ID 추출 완성**: URL ID → 실제 ID 변환 시스템 완전 구현

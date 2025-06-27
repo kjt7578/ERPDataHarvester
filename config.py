@@ -31,7 +31,7 @@ class Config:
         self.login_url = '/mem/dispLogin'
         
         # Paths Configuration
-        self.resumes_dir = Path(os.getenv('RESUMES_DIR', './resumes'))
+        self.resumes_dir = Path(os.getenv('RESUMES_DIR', './resume'))
         self.metadata_dir = Path(os.getenv('METADATA_DIR', './metadata'))
         self.results_dir = Path(os.getenv('RESULTS_DIR', './results'))
         self.logs_dir = Path(os.getenv('LOGS_DIR', './logs'))

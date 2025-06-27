@@ -566,7 +566,11 @@ class ERPResumeHarvester:
             
             # Save metadata if requested
             if save_individual:
+                # Save metadata (existing format in metadata folder)
                 self.metadata_saver.save_case_metadata(case_info.to_dict())
+                
+                # Save detailed JD info (new format in case folder)
+                self.metadata_saver.save_case_jd_info(case_info.to_dict())
                 
             return case_info.to_dict()
             
@@ -595,8 +599,11 @@ class ERPResumeHarvester:
             # Parse detailed information
             case_info = self.scraper.parse_jobcase_detail(html, case_id)
             
-            # Save metadata
+            # Save metadata (existing format in metadata folder)
             self.metadata_saver.save_case_metadata(case_info.to_dict())
+            
+            # Save detailed JD info (new format in case folder)
+            self.metadata_saver.save_case_jd_info(case_info.to_dict())
             
             return case_info.to_dict()
             
@@ -650,6 +657,8 @@ class ERPResumeHarvester:
             
             case_info = self._process_specific_case(str(case_id), save_individual=False)
             if case_info:
+                # Save individual JD info for each case in range
+                self.metadata_saver.save_case_jd_info(case_info)
                 all_cases.append(case_info)
                 successful_count += 1
                 logging.info(f"✅ Successfully processed case {case_id}")
