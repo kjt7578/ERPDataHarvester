@@ -576,76 +576,51 @@ class ERPResumeHarvester:
     def harvest_cases(self, start_page: int = 1, 
                      specific_id: Optional[str] = None,
                      id_range: Optional[str] = None,
-                     id_type: str = 'url') -> bool:
+                     id_type: str = 'url',
+                     with_candidates: bool = False) -> bool:
         """
         Harvest cases from ERP system
         
         Args:
-            start_page: Starting page number for full harvest
-            specific_id: Process only this specific case ID
+            start_page: Starting page number (default: 1)
+            specific_id: Process specific case ID
             id_range: Process range of IDs (format: "3897-3895" or "3895,3896,3897")
             id_type: Type of IDs ('url', 'real', or 'auto') - currently cases use same ID
+            with_candidates: Also download connected candidate resumes and metadata
             
         Returns:
             True if successful, False otherwise
         """
-        try:
-            if not self.initialize():
-                return False
-                
-            self.stats['start_time'] = datetime.now()
-            start_time = self.stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')
-            
-            if specific_id:
-                # For cases, currently URL and Real IDs are handled the same
-                id_info = convert_case_id(specific_id, id_type)
-                url_id = id_info['url_id']
-                
-                logging.info(f"Processing specific case: {specific_id} (ID type: {id_type})")
-                logging.info(f"  Using ID: {url_id}")
-                
-                self.metadata_saver.set_command_info('case', 'single_id', f"{specific_id} ({id_type})", start_time)
-                success = self._process_specific_case(url_id) is not None
-            elif id_range:
-                logging.info(f"Processing case ID range: {id_range} (ID type: {id_type})")
-                self.metadata_saver.set_command_info('case', 'id_range', f"{id_range} ({id_type})", start_time)
-                success = self._process_case_id_range(id_range, id_type)
-                # _process_case_id_range already generates its own report, so we skip the duplicate report generation
-                return success
-            else:
-                logging.info("Starting full case harvest process...")
-                self.metadata_saver.set_command_info('case', 'page_crawl', f'from page {start_page}', start_time)
-                success = self._process_all_cases(start_page)
-                
-            self.stats['end_time'] = datetime.now()
-            self._print_summary()
-            
-            # Generate report (case에는 다운로드가 없으므로 빈 stats 사용)
-            download_stats = {
-                'total': self.stats.get('candidates_found', 0),  # Reusing for cases
-                'successful': self.stats.get('candidates_found', 0),
-                'failed': 0,
-                'skipped': 0,
-                'success_rate': 100.0 if self.stats.get('candidates_found', 0) > 0 else 0.0,
-                'total_size_mb': 0.0,
-                'successful_candidates': [],
-                'failed_candidates': [],
-                'skipped_candidates': []
-            }
-            self.metadata_saver.generate_download_report(download_stats)
-            
-            return success
-            
-        except KeyboardInterrupt:
-            logging.info("Case harvest interrupted by user")
+        if not self.initialize():
             return False
+            
+        try:
+            if specific_id:
+                logging.info(f"Processing specific case: {specific_id} (ID type: {id_type})")
+                if with_candidates:
+                    logging.info("🔄 Will also process connected candidates")
+                case_info = self._process_specific_case(specific_id, save_individual=True, with_candidates=with_candidates)
+                return case_info is not None
+                
+            elif id_range:
+                logging.info(f"Processing case range: {id_range} (ID type: {id_type})")
+                if with_candidates:
+                    logging.info("🔄 Will also process connected candidates for each case")
+                return self._process_case_id_range(id_range, id_type, with_candidates=with_candidates)
+                
+            else:
+                logging.info(f"Processing all cases starting from page {start_page}")
+                if with_candidates:
+                    logging.info("🔄 Will also process connected candidates for each case")
+                return self._process_all_cases(start_page, with_candidates=with_candidates)
+                
         except Exception as e:
-            logging.error(f"Error during case harvest: {e}")
+            logging.error(f"Error in harvest_cases: {e}")
             return False
         finally:
             self.cleanup()
 
-    def _process_all_cases(self, start_page: int) -> bool:
+    def _process_all_cases(self, start_page: int, with_candidates: bool = False) -> bool:
         """Process all cases from multiple pages"""
         all_cases = []
         page = start_page
@@ -670,7 +645,7 @@ class ERPResumeHarvester:
                 
                 # Process each case
                 for case in cases:
-                    case_info = self._process_case(case)
+                    case_info = self._process_case(case, with_candidates)
                     if case_info:
                         all_cases.append(case_info)
                         self.stats['candidates_found'] += 1  # Reusing for cases
@@ -704,33 +679,34 @@ class ERPResumeHarvester:
             
         return len(all_cases) > 0
 
-    def _process_specific_case(self, case_id: str, save_individual: bool = True) -> Optional[Dict[str, Any]]:
+    def _process_specific_case(self, case_id: str, save_individual: bool = True, with_candidates: bool = False) -> Optional[Dict[str, Any]]:
         """Process a specific case by ID"""
         try:
-            detail_url = f"{config.erp_base_url}{config.case_detail_url}".format(id=case_id)
-            logging.info(f"Fetching case details from: {detail_url}")
+            # Convert case ID if needed
+            id_info = convert_case_id(case_id, 'url')  # Assume URL ID
+            url_id = id_info['url_id']
             
-            response = self.session.get(detail_url)
-            html = response.text if hasattr(response, 'text') else str(response)
+            # Create case basic info for processing
+            case_basic = {
+                'jobcase_id': str(url_id),
+                'detail_url': f"{config.erp_base_url}{config.case_detail_url}".format(id=url_id)
+            }
             
             # Parse case details
-            case_info = self.scraper.parse_jobcase_detail(html, case_id)
+            case_info = self._process_case(case_basic, with_candidates=with_candidates)
             
             # Save metadata if requested
-            if save_individual:
-                # Save metadata (existing format in metadata folder)
-                self.metadata_saver.save_case_metadata(case_info.to_dict())
+            if save_individual and case_info:
+                self.metadata_saver.save_case_metadata(case_info)
+                self.metadata_saver.save_case_jd_info(case_info)
                 
-                # Save detailed JD info (new format in case folder)
-                self.metadata_saver.save_case_jd_info(case_info.to_dict())
-                
-            return case_info.to_dict()
+            return case_info
             
         except Exception as e:
-            logging.error(f"Error processing case {case_id}: {e}")
+            logging.error(f"Error processing specific case {case_id}: {e}")
             return None
 
-    def _process_case(self, case_basic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _process_case(self, case_basic: Dict[str, Any], with_candidates: bool = False) -> Optional[Dict[str, Any]]:
         """Process a case with full details"""
         case_id = case_basic.get('jobcase_id')
         if not case_id:
@@ -749,7 +725,7 @@ class ERPResumeHarvester:
             html = response.text if hasattr(response, 'text') else str(response)
             
             # Parse detailed information
-            case_info = self.scraper.parse_jobcase_detail(html, case_id)
+            case_info = self.scraper.parse_jobcase_detail(html, case_id, with_candidates=with_candidates)
             
             # Save metadata (existing format in metadata folder)
             self.metadata_saver.save_case_metadata(case_info.to_dict())
@@ -763,13 +739,14 @@ class ERPResumeHarvester:
             logging.error(f"Error processing case {case_id}: {e}")
             return None
 
-    def _process_case_id_range(self, id_range: str, id_type: str = 'url') -> bool:
+    def _process_case_id_range(self, id_range: str, id_type: str = 'url', with_candidates: bool = False) -> bool:
         """
         Process a range of case IDs with support for both URL and Real IDs
         
         Args:
             id_range: Range specification like "3897-3890" or "13897-13890"
             id_type: Type of IDs ('url', 'real', or 'auto') 
+            with_candidates: Also download connected candidate resumes and metadata
             
         Returns:
             True if at least one case was processed successfully
@@ -799,7 +776,7 @@ class ERPResumeHarvester:
             for i, case_url_id in enumerate(case_url_ids, 1):
                 logging.info(f"Processing case {i}/{len(case_url_ids)}: URL ID {case_url_id}")
                 
-                case_info = self._process_specific_case(str(case_url_id), save_individual=False)
+                case_info = self._process_specific_case(str(case_url_id), save_individual=False, with_candidates=with_candidates)
                 if case_info:
                     all_cases.append(case_info)
                     successful_count += 1
@@ -901,6 +878,11 @@ def main():
         action='store_true',
         help='Analyze Case ID patterns by collecting URL ID -> Real ID mappings'
     )
+    parser.add_argument(
+        '--with-candidates',
+        action='store_true',
+        help='[CASE ONLY] Also download connected candidate resumes and metadata'
+    )
     
     args = parser.parse_args()
     
@@ -955,6 +937,14 @@ def main():
         print("  Look for 'CASE ID MAPPING:' lines in the output")
         print("-" * 50)
     
+    # Validate --with-candidates usage
+    if args.with_candidates and args.type != 'case':
+        print("Error: --with-candidates can only be used with --type case")
+        return False
+    
+    if args.with_candidates:
+        print("🎯 Case + Candidate Mode: Will also download connected candidate resumes and metadata")
+    
     # Create harvester and run appropriate method
     harvester = ERPResumeHarvester(use_selenium=True)
     
@@ -963,7 +953,8 @@ def main():
             start_page=args.page,
             specific_id=specific_id,
             id_range=id_range,
-            id_type=id_type
+            id_type=id_type,
+            with_candidates=args.with_candidates
         )
     else:  # candidate (default)
         success = harvester.harvest_candidates(

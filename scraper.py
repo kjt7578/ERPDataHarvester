@@ -912,13 +912,14 @@ class ERPScraper:
                     
         return jobcase
         
-    def parse_jobcase_detail(self, html: str, jobcase_id: str) -> JobCaseInfo:
+    def parse_jobcase_detail(self, html: str, jobcase_id: str, with_candidates: bool = False) -> JobCaseInfo:
         """
         Parse HRcap ERP jobcase detail page to extract complete information
         
         Args:
             html: HTML content of detail page
             jobcase_id: JobCase URL ID (will be replaced with actual Case No)
+            with_candidates: Flag to include connected candidates and resume
             
         Returns:
             JobCaseInfo object with extracted data
@@ -1158,6 +1159,8 @@ class ERPScraper:
             
         # Extract connected candidate IDs by visiting each candidate page
         candidate_ids = []
+        candidate_detailed_info = []  # Store detailed candidate info if with_candidates is True
+        
         try:
             # Find all elements with openCandidate onclick to get URL IDs
             onclick_elements = soup.find_all(attrs={'onclick': re.compile(r'openCandidate\(\d+\)')})
@@ -1171,18 +1174,23 @@ class ERPScraper:
                         candidate_url_ids.append(url_candidate_id)
                         logger.info(f"Found candidate URL ID: {url_candidate_id}")
             
-            # Visit each candidate page to get actual Candidate ID
+            # Visit each candidate page to get actual Candidate ID and optionally detailed info
             if hasattr(self, 'session') and self.session:
-                for candidate_url_id in candidate_url_ids:
+                for i, candidate_url_id in enumerate(candidate_url_ids, 1):
                     try:
                         candidate_url = f"{self.base_url}/candidate/dispView/{candidate_url_id}"
-                        logger.info(f"Fetching candidate details from: {candidate_url}")
+                        
+                        if with_candidates:
+                            logger.info(f"🎯 Processing candidate {i}/{len(candidate_url_ids)}: URL ID {candidate_url_id} (with full details)")
+                        else:
+                            logger.info(f"Fetching candidate details from: {candidate_url}")
                         
                         response = self.session.get(candidate_url)
                         candidate_html = response.text if hasattr(response, 'text') else str(response)
                         candidate_soup = BeautifulSoup(candidate_html, 'html.parser')
                         
                         # Extract actual Candidate ID
+                        actual_candidate_id = None
                         candidate_id_th = candidate_soup.find('th', string='Candidate ID')
                         if candidate_id_th:
                             candidate_id_td = candidate_id_th.find_next_sibling('td')
@@ -1194,10 +1202,60 @@ class ERPScraper:
                                 # Fallback to URL ID if actual ID not found
                                 candidate_ids.append(candidate_url_id)
                                 logger.warning(f"Candidate ID td not found, using URL ID: {candidate_url_id}")
+                                actual_candidate_id = candidate_url_id
                         else:
                             # Fallback to URL ID if actual ID not found  
                             candidate_ids.append(candidate_url_id)
                             logger.warning(f"Candidate ID th not found, using URL ID: {candidate_url_id}")
+                            actual_candidate_id = candidate_url_id
+                        
+                        # If with_candidates is True, extract full candidate details and download resume
+                        if with_candidates and actual_candidate_id:
+                            try:
+                                logger.info(f"📋 Extracting detailed information for candidate {actual_candidate_id}")
+                                
+                                # Parse candidate detail from already fetched HTML
+                                candidate_info = self.parse_candidate_detail(
+                                    candidate_html, 
+                                    candidate_url_id, 
+                                    raw_html=candidate_html,
+                                    detail_url=candidate_url
+                                )
+                                
+                                if candidate_info:
+                                    # Store candidate detailed info
+                                    candidate_detailed_info.append(candidate_info)
+                                    
+                                    # Import necessary modules for file operations
+                                    from metadata_saver import MetadataSaver
+                                    from downloader import ResumeDownloader
+                                    from file_utils import ensure_directory_exists
+                                    import config
+                                    
+                                    # Save individual candidate metadata
+                                    metadata_saver = MetadataSaver()
+                                    metadata_saver.save_candidate_metadata(candidate_info.to_dict())
+                                    logger.info(f"💾 Saved metadata for candidate {candidate_info.candidate_id}")
+                                    
+                                    # Download resume if URL is available
+                                    if candidate_info.resume_url:
+                                        try:
+                                            downloader = ResumeDownloader(self.session)
+                                            resume_path = downloader.download_resume(candidate_info)
+                                            if resume_path:
+                                                logger.info(f"📄 Downloaded resume for candidate {candidate_info.candidate_id}: {resume_path}")
+                                            else:
+                                                logger.warning(f"❌ Failed to download resume for candidate {candidate_info.candidate_id}")
+                                        except Exception as e:
+                                            logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
+                                    else:
+                                        logger.warning(f"⚠️ No resume URL found for candidate {candidate_info.candidate_id}")
+                                        
+                                else:
+                                    logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ Error processing candidate details for {actual_candidate_id}: {e}")
                             
                         time.sleep(1)  # Brief delay between requests
                         
@@ -1211,7 +1269,20 @@ class ERPScraper:
                 logger.warning("Session not available, using URL IDs for candidates")
                         
             info['candidate_ids'] = candidate_ids
-            logger.info(f"Total connected candidates: {len(candidate_ids)}")
+            
+            if with_candidates:
+                if candidate_ids:
+                    logger.info(f"🎯 Total connected candidates: {len(candidate_ids)} (processed {len(candidate_detailed_info)} with full details)")
+                else:
+                    logger.info("🎯 No candidates connected to this case - only case information will be saved")
+                # Store detailed candidate info in the JobCaseInfo for reference
+                info['_connected_candidates_details'] = [c.to_dict() for c in candidate_detailed_info]
+            else:
+                if candidate_ids:
+                    logger.info(f"Total connected candidates: {len(candidate_ids)}")
+                else:
+                    logger.info("No candidates connected to this case")
+                
         except Exception as e:
             logger.debug(f"Failed to extract candidate IDs: {e}")
             info['candidate_ids'] = []

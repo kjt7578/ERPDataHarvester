@@ -134,6 +134,17 @@ python main.py --type case --id 3897 --log-level WARNING
 python main.py --type case --range "3897-3890" --analyze-case-pattern
 ```
 
+### ✨ Case + Candidate 통합 수집 (NEW!)
+```bash
+# Case 정보와 연결된 모든 candidate 정보도 함께 수집
+python main.py --type case --id 3897 --with-candidates
+python main.py --type case --range "3897-3890" --with-candidates
+python main.py --type case --real-id 13897 --with-candidates
+python main.py --type case --real-range "13897-13890" --with-candidates
+
+# 주의: --with-candidates는 Case 타입에서만 사용 가능
+```
+
 ## 📊 ID 변환 패턴
 
 ### 자동 변환 규칙
@@ -386,3 +397,7 @@ harvester.harvest_candidates(start_page=10, end_page=20)
 if candidate_info.status == 'Active':
     process_candidate(candidate_info)
 ```
+
+**특별한 경우:**
+- Case에 연결된 candidate가 없는 경우: Case 정보만 정상적으로 수집됨
+- 네트워크 오류나 권한 문제로 candidate 페이지 접근 실패 시: Case 정보는 수집되고 candidate 처리는 건너뜀
