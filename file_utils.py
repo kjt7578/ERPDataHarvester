@@ -789,9 +789,116 @@ def get_candidate_id_range(candidate_id: int) -> str:
     return f"{start}-{end}"
 
 
+def get_candidate_id_range_1000(candidate_id: int) -> str:
+    """
+    Get candidate ID range in 1000-unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Range string (e.g., "1044000-1044999")
+    """
+    # Calculate the start of the 1000-unit range
+    start = (candidate_id // 1000) * 1000
+    end = start + 999
+    return f"{start}-{end}"
+
+
+def get_candidate_id_range_10000(candidate_id: int) -> str:
+    """
+    Get candidate ID range in 10000-unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Range string (e.g., "1040000-1049999")
+    """
+    # Calculate the start of the 10000-unit range
+    start = (candidate_id // 10000) * 10000
+    end = start + 9999
+    return f"{start}-{end}"
+
+
+def get_candidate_id_range_100000(candidate_id: int) -> str:
+    """
+    Get candidate ID range in 100000-unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Range string (e.g., "1000000-1099999")
+    """
+    # Calculate the start of the 100000-unit range
+    start = (candidate_id // 100000) * 100000
+    end = start + 99999
+    return f"{start}-{end}"
+
+
+def get_candidate_id_range_1000000(candidate_id: int) -> str:
+    """
+    Get candidate ID range in 1000000-unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Range string (e.g., "1000000-1999999")
+    """
+    # Calculate the start of the 1000000-unit range
+    start = (candidate_id // 1000000) * 1000000
+    end = start + 999999
+    return f"{start}-{end}"
+
+
+def get_candidate_id_range_enhanced(candidate_id: int, unit: int = 100) -> str:
+    """
+    Get candidate ID range in specified unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        unit: Unit size (100, 1000, 10000, 100000, or 1000000)
+        
+    Returns:
+        Range string (e.g., "1044700-1044799" for unit=100, "1044000-1044999" for unit=1000)
+    """
+    valid_units = [100, 1000, 10000, 100000, 1000000]
+    if unit not in valid_units:
+        raise ValueError(f"Unit must be one of {valid_units}")
+    
+    # Calculate the start of the specified unit range
+    start = (candidate_id // unit) * unit
+    end = start + (unit - 1)
+    return f"{start}-{end}"
+
+
+def get_optimal_folder_unit(candidate_id: int) -> int:
+    """
+    Automatically determine optimal folder unit based on candidate ID size
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Optimal unit size (100, 1000, 10000, 100000, or 1000000)
+    """
+    if candidate_id < 1000:
+        return 100
+    elif candidate_id < 10000:
+        return 1000
+    elif candidate_id < 100000:
+        return 10000
+    elif candidate_id < 1000000:
+        return 100000
+    else:
+        return 1000000
+
+
 def create_candidate_directory_structure(base_path: Path, candidate_id: int) -> Path:
     """
-    Create directory structure for candidate storage
+    Create directory structure for candidate storage (100-unit format)
     
     Args:
         base_path: Base directory path (e.g., Resume/)
@@ -805,4 +912,160 @@ def create_candidate_directory_structure(base_path: Path, candidate_id: int) -> 
     full_path.mkdir(parents=True, exist_ok=True)
     
     logger.debug(f"Created candidate directory structure: {full_path}")
+    return full_path
+
+
+def create_candidate_directory_structure_1000(base_path: Path, candidate_id: int) -> Path:
+    """
+    Create directory structure for candidate storage using 1000-unit format
+    
+    Args:
+        base_path: Base directory path (e.g., Resume/)
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Full path to the created directory
+    """
+    range_str = get_candidate_id_range_1000(candidate_id)
+    full_path = base_path / range_str
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created candidate directory structure (1000-unit): {full_path}")
+    return full_path
+
+
+def create_candidate_directory_structure_enhanced(base_path: Path, candidate_id: int, unit: int = 100) -> Path:
+    """
+    Create enhanced directory structure for candidate storage with configurable unit size
+    
+    Args:
+        base_path: Base directory path (e.g., Resume/)
+        candidate_id: Candidate ID (e.g., 1044760)
+        unit: Unit size for folder structure (100, 1000, 10000, 100000, or 1000000)
+        
+    Returns:
+        Full path to the created directory
+    """
+    range_str = get_candidate_id_range_enhanced(candidate_id, unit)
+    full_path = base_path / range_str
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created enhanced candidate directory structure: {full_path} (unit: {unit})")
+    return full_path 
+
+
+def get_hierarchical_folder_path(candidate_id: int) -> str:
+    """
+    Generate hierarchical folder path based on candidate ID
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1111111)
+        
+    Returns:
+        Hierarchical path string (e.g., "1000000/1100000/1110000/1111000-1111199")
+    """
+    # Convert to string and pad with zeros to ensure 7 digits
+    id_str = str(candidate_id).zfill(7)
+    
+    # Extract each level
+    million_level = int(id_str[0]) * 1000000  # 1000000
+    hundred_thousand_level = int(id_str[0:2]) * 10000  # 1100000
+    ten_thousand_level = int(id_str[0:3]) * 1000  # 1110000
+    
+    # Calculate 100-unit range for the final level
+    start_100 = (candidate_id // 100) * 100
+    end_100 = start_100 + 99
+    final_range = f"{start_100}-{end_100}"
+    
+    # Build hierarchical path
+    path_parts = [
+        str(million_level),
+        str(hundred_thousand_level),
+        str(ten_thousand_level),
+        final_range
+    ]
+    
+    return "/".join(path_parts)
+
+
+def create_hierarchical_directory_structure(base_path: Path, candidate_id: int) -> Path:
+    """
+    Create hierarchical directory structure for candidate storage
+    
+    Args:
+        base_path: Base directory path (e.g., Resume/)
+        candidate_id: Candidate ID (e.g., 1111111)
+        
+    Returns:
+        Full path to the created directory
+    """
+    hierarchical_path = get_hierarchical_folder_path(candidate_id)
+    full_path = base_path / hierarchical_path
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created hierarchical directory structure: {full_path}")
+    return full_path
+
+
+def get_hierarchical_folder_path_enhanced(candidate_id: int, levels: int = 4) -> str:
+    """
+    Generate enhanced hierarchical folder path with configurable levels
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1111111)
+        levels: Number of hierarchy levels (1-4, default: 4)
+        
+    Returns:
+        Hierarchical path string
+    """
+    if levels < 1 or levels > 4:
+        raise ValueError("Levels must be between 1 and 4")
+    
+    # Convert to string and pad with zeros to ensure 7 digits
+    id_str = str(candidate_id).zfill(7)
+    
+    path_parts = []
+    
+    if levels >= 1:
+        # Level 1: Million (1000000)
+        million_level = int(id_str[0]) * 1000000
+        path_parts.append(str(million_level))
+    
+    if levels >= 2:
+        # Level 2: Hundred thousand (1100000)
+        hundred_thousand_level = int(id_str[0:2]) * 10000
+        path_parts.append(str(hundred_thousand_level))
+    
+    if levels >= 3:
+        # Level 3: Ten thousand (1110000)
+        ten_thousand_level = int(id_str[0:3]) * 1000
+        path_parts.append(str(ten_thousand_level))
+    
+    if levels >= 4:
+        # Level 4: Hundred range (1111000-1111199)
+        start_100 = (candidate_id // 100) * 100
+        end_100 = start_100 + 99
+        final_range = f"{start_100}-{end_100}"
+        path_parts.append(final_range)
+    
+    return "/".join(path_parts)
+
+
+def create_hierarchical_directory_structure_enhanced(base_path: Path, candidate_id: int, levels: int = 4) -> Path:
+    """
+    Create enhanced hierarchical directory structure with configurable levels
+    
+    Args:
+        base_path: Base directory path (e.g., Resume/)
+        candidate_id: Candidate ID (e.g., 1111111)
+        levels: Number of hierarchy levels (1-4, default: 4)
+        
+    Returns:
+        Full path to the created directory
+    """
+    hierarchical_path = get_hierarchical_folder_path_enhanced(candidate_id, levels)
+    full_path = base_path / hierarchical_path
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created enhanced hierarchical directory structure: {full_path} (levels: {levels})")
     return full_path 

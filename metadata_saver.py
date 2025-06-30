@@ -619,7 +619,7 @@ class MetadataSaver:
                 f.write("ERP Resume Processing Report\n")
                 f.write("=" * 60 + "\n\n")
                 f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
+                
                 # 데이터가 비어 있을 때 안내 메시지
                 if not download_stats or (not self.processing_errors and not self.warnings and not download_stats.get('successful_candidates') and not download_stats.get('failed_candidates')):
                     f.write("⚠️ No processing data available.\n")
@@ -802,7 +802,7 @@ class MetadataSaver:
                         else:
                             f.write("• Retry failed downloads with increased timeout\n")
                             f.write("• Check file format compatibility\n")
-                
+                        
             logger.info(f"Generated comprehensive processing report: {report_path}")
             return report_path
             

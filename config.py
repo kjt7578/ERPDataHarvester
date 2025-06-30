@@ -50,6 +50,24 @@ class Config:
         self.page_load_timeout = self._get_int_env('PAGE_LOAD_TIMEOUT', 30)
         self.download_timeout = self._get_int_env('DOWNLOAD_TIMEOUT', 60)
         self.max_retries = self._get_int_env('MAX_RETRIES', 3)
+        
+        # Directory Structure Configuration
+        self.folder_unit = self._get_int_env('FOLDER_UNIT', 100)  # 100, 1000, 10000, 100000, or 1000000
+        valid_units = [100, 1000, 10000, 100000, 1000000]
+        if self.folder_unit not in valid_units:
+            self.folder_unit = 100  # Default to 100 if invalid
+            logging.warning(f"Invalid FOLDER_UNIT: {self.folder_unit}. Using default: 100")
+        
+        # Auto-detect optimal unit based on largest known ID
+        self.auto_folder_unit = self._get_bool_env('AUTO_FOLDER_UNIT', True)
+        
+        # Hierarchical folder structure configuration
+        self.use_hierarchical_structure = self._get_bool_env('USE_HIERARCHICAL_STRUCTURE', True)
+        self.hierarchical_levels = self._get_int_env('HIERARCHICAL_LEVELS', 4)  # 1-4 levels
+        if self.hierarchical_levels < 1 or self.hierarchical_levels > 4:
+            self.hierarchical_levels = 4  # Default to 4 if invalid
+            logging.warning(f"Invalid HIERARCHICAL_LEVELS: {self.hierarchical_levels}. Using default: 4")
+        
         self.retry_delay = self._get_float_env('RETRY_DELAY', 5.0)
         
         # Speed control for server protection
@@ -112,6 +130,21 @@ class Config:
             return float(value)
         except (ValueError, TypeError):
             logging.warning(f"Invalid float value for {key}, using default: {default}")
+            return default
+    
+    def _get_bool_env(self, key: str, default: bool) -> bool:
+        """Get boolean environment variable with error handling"""
+        try:
+            value = self._get_clean_env(key, str(default)).lower()
+            if value in ['true', '1', 'yes', 'on']:
+                return True
+            elif value in ['false', '0', 'no', 'off']:
+                return False
+            else:
+                logging.warning(f"Invalid boolean value for {key}: {value}, using default: {default}")
+                return default
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid boolean value for {key}, using default: {default}")
             return default
     
     def _load_env_file(self):
@@ -182,10 +215,22 @@ class Config:
     def get_resume_path(self, candidate_id: str, filename: str) -> Path:
         """Get the full path for a resume file based on candidate ID"""
         try:
-            from file_utils import get_candidate_id_range
+            from file_utils import get_candidate_id_range_enhanced, get_optimal_folder_unit, get_hierarchical_folder_path_enhanced
             candidate_id_num = int(candidate_id)
-            range_str = get_candidate_id_range(candidate_id_num)
-            return self.resumes_dir / range_str / filename
+            
+            if self.use_hierarchical_structure:
+                # Use hierarchical structure
+                hierarchical_path = get_hierarchical_folder_path_enhanced(candidate_id_num, self.hierarchical_levels)
+                return self.resumes_dir / hierarchical_path / filename
+            else:
+                # Use flat structure with auto-detection
+                if self.auto_folder_unit:
+                    unit = get_optimal_folder_unit(candidate_id_num)
+                else:
+                    unit = self.folder_unit
+                    
+                range_str = get_candidate_id_range_enhanced(candidate_id_num, unit)
+                return self.resumes_dir / range_str / filename
         except:
             # Fallback to current date structure for backward compatibility
             from datetime import datetime

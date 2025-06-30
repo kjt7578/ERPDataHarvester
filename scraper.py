@@ -1380,14 +1380,36 @@ class ERPScraper:
                                     # Download resume if URL is available
                                     if candidate_info.resume_url and self.downloader:
                                         try:
-                                            from file_utils import generate_resume_filename, create_candidate_directory_structure
+                                            from file_utils import generate_resume_filename, create_candidate_directory_structure_enhanced, get_optimal_folder_unit, create_hierarchical_directory_structure_enhanced
                                             from config import config
                                             resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
                                             
-                                            # Create directory based on candidate ID
+                                            # Create directory based on candidate ID using hierarchical or flat structure
                                             try:
                                                 candidate_id_num = int(candidate_info.candidate_id)
-                                                resume_dir = create_candidate_directory_structure(config.resumes_dir, candidate_id_num)
+                                                
+                                                if config.use_hierarchical_structure:
+                                                    # Use hierarchical directory structure
+                                                    resume_dir = create_hierarchical_directory_structure_enhanced(
+                                                        config.resumes_dir, 
+                                                        candidate_id_num, 
+                                                        config.hierarchical_levels
+                                                    )
+                                                    logger.debug(f"Using hierarchical structure (levels: {config.hierarchical_levels}) for candidate ID: {candidate_id_num}")
+                                                else:
+                                                    # Use flat directory structure with auto-detection
+                                                    if config.auto_folder_unit:
+                                                        unit = get_optimal_folder_unit(candidate_id_num)
+                                                        logger.debug(f"Auto-selected folder unit: {unit} for candidate ID: {candidate_id_num}")
+                                                    else:
+                                                        unit = config.folder_unit
+                                                        logger.debug(f"Using configured folder unit: {unit} for candidate ID: {candidate_id_num}")
+                                                    
+                                                    resume_dir = create_candidate_directory_structure_enhanced(
+                                                        config.resumes_dir, 
+                                                        candidate_id_num, 
+                                                        unit
+                                                    )
                                             except:
                                                 # Fallback to direct path for backward compatibility
                                                 resume_dir = config.resumes_dir
