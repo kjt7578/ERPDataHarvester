@@ -1380,10 +1380,19 @@ class ERPScraper:
                                     # Download resume if URL is available
                                     if candidate_info.resume_url and self.downloader:
                                         try:
-                                            from file_utils import generate_resume_filename
+                                            from file_utils import generate_resume_filename, create_candidate_directory_structure
                                             from config import config
                                             resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
-                                            resume_path = Path(config.resumes_dir) / resume_filename
+                                            
+                                            # Create directory based on candidate ID
+                                            try:
+                                                candidate_id_num = int(candidate_info.candidate_id)
+                                                resume_dir = create_candidate_directory_structure(config.resumes_dir, candidate_id_num)
+                                            except:
+                                                # Fallback to direct path for backward compatibility
+                                                resume_dir = config.resumes_dir
+                                            
+                                            resume_path = resume_dir / resume_filename
                                             
                                             success, final_path, ext = self.downloader.download_resume(
                                                 candidate_info.resume_url, 

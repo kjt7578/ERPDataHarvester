@@ -401,3 +401,20 @@ if candidate_info.status == 'Active':
 **특별한 경우:**
 - Case에 연결된 candidate가 없는 경우: Case 정보만 정상적으로 수집됨
 - 네트워크 오류나 권한 문제로 candidate 페이지 접근 실패 시: Case 정보는 수집되고 candidate 처리는 건너뜀
+
+## 📦 데이터/다운로드 파일 전체 정리 (logs 폴더 보존)
+
+Content 폴더 내 다운로드 파일/폴더를 모두 삭제하고 싶을 때 아래 명령어를 사용하세요. (logs 폴더는 보존됩니다)
+
+```bash
+python cleanup_content.py
+```
+
+- 삭제 전 삭제 대상 목록이 출력되고, yes/no로 확인 후 삭제됩니다.
+- --dry-run 옵션을 사용하면 실제 삭제 없이 시뮬레이션만 할 수 있습니다.
+- --force 옵션을 사용하면 확인 절차 없이 바로 삭제합니다.
+
+```bash
+python cleanup_content.py --dry-run   # 실제 삭제 없이 목록만 확인
+python cleanup_content.py --force     # 확인 없이 즉시 삭제 (주의!)
+```

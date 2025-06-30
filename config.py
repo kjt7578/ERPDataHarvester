@@ -179,15 +179,15 @@ class Config:
             
         return True
         
-    def get_resume_path(self, created_date: str, filename: str) -> Path:
-        """Get the full path for a resume file based on created date"""
-        # Extract year and month from created_date (assuming format: YYYY-MM-DD)
+    def get_resume_path(self, candidate_id: str, filename: str) -> Path:
+        """Get the full path for a resume file based on candidate ID"""
         try:
-            year = created_date[:4]
-            month = created_date[5:7]
-            return self.resumes_dir / year / month / filename
+            from file_utils import get_candidate_id_range
+            candidate_id_num = int(candidate_id)
+            range_str = get_candidate_id_range(candidate_id_num)
+            return self.resumes_dir / range_str / filename
         except:
-            # Fallback to current date structure
+            # Fallback to current date structure for backward compatibility
             from datetime import datetime
             now = datetime.now()
             return self.resumes_dir / str(now.year) / f"{now.month:02d}" / filename

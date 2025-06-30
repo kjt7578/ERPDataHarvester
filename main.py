@@ -28,7 +28,8 @@ from file_utils import (
     predict_real_candidate_id,
     predict_url_candidate_id,
     predict_real_case_id,
-    predict_url_case_id
+    predict_url_case_id,
+    create_candidate_directory_structure
 )
 
 
@@ -466,9 +467,14 @@ class ERPResumeHarvester:
             extension='pdf'
         )
         
-        # Determine directory based on created date
-        year, month = extract_date_parts(candidate_info.created_date)
-        resume_dir = create_directory_structure(config.resumes_dir, year, month)
+        # Determine directory based on candidate ID
+        try:
+            candidate_id_num = int(candidate_info.candidate_id)
+            resume_dir = create_candidate_directory_structure(config.resumes_dir, candidate_id_num)
+        except:
+            # Fallback to date-based structure for backward compatibility
+            year, month = extract_date_parts(candidate_info.created_date)
+            resume_dir = create_directory_structure(config.resumes_dir, year, month)
         
         # Full path for PDF
         pdf_path = resume_dir / filename

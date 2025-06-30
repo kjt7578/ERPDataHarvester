@@ -195,7 +195,7 @@ def generate_unique_filename(base_path: Path, filename: str) -> str:
 
 def create_directory_structure(base_path: Path, year: str, month: str) -> Path:
     """
-    Create directory structure for resume storage
+    Create directory structure for resume storage (DEPRECATED - use create_candidate_directory_structure)
     
     Args:
         base_path: Base directory path (e.g., resumes/)
@@ -205,6 +205,8 @@ def create_directory_structure(base_path: Path, year: str, month: str) -> Path:
     Returns:
         Full path to the created directory
     """
+    # Deprecated: Use create_candidate_directory_structure instead
+    logger.warning("create_directory_structure is deprecated. Use create_candidate_directory_structure instead.")
     full_path = base_path / year / month
     full_path.mkdir(parents=True, exist_ok=True)
     
@@ -768,4 +770,39 @@ def create_client_directory_structure(base_path: Path, client_id: int) -> Path:
     full_path.mkdir(parents=True, exist_ok=True)
     
     logger.debug(f"Created client directory structure: {full_path}")
+    return full_path 
+
+
+def get_candidate_id_range(candidate_id: int) -> str:
+    """
+    Get candidate ID range in 100-unit format
+    
+    Args:
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Range string (e.g., "1044700-1044799")
+    """
+    # Calculate the start of the 100-unit range
+    start = (candidate_id // 100) * 100
+    end = start + 99
+    return f"{start}-{end}"
+
+
+def create_candidate_directory_structure(base_path: Path, candidate_id: int) -> Path:
+    """
+    Create directory structure for candidate storage
+    
+    Args:
+        base_path: Base directory path (e.g., Resume/)
+        candidate_id: Candidate ID (e.g., 1044760)
+        
+    Returns:
+        Full path to the created directory
+    """
+    range_str = get_candidate_id_range(candidate_id)
+    full_path = base_path / range_str
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created candidate directory structure: {full_path}")
     return full_path 
