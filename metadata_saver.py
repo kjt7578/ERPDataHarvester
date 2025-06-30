@@ -615,7 +615,8 @@ class MetadataSaver:
                 # Command Information Section
                 f.write("📋 Command Information:\n")
                 f.write("-" * 30 + "\n")
-                f.write(f"Data Type: {self.command_info.get('data_type', 'N/A').upper()}\n")
+                data_type_val = self.command_info.get('data_type', 'N/A')
+                f.write(f"Data Type: {data_type_val.upper() if data_type_val else 'N/A'}\n")
                 f.write(f"Execution Mode: {self.command_info.get('execution_mode', 'N/A')}\n")
                 if self.command_info.get('target_range'):
                     f.write(f"Target Range: {self.command_info.get('target_range')}\n")

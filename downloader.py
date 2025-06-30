@@ -47,211 +47,136 @@ class PDFDownloader:
             'skipped_candidates': []      # List of skipped candidate info
         }
         
-    def download_resume(self, url: str, save_path: Path, 
-                      candidate_info: Dict[str, Any]) -> bool:
+    def download_resume(self, url: str, save_path: Path, candidate_info: Dict[str, Any]):
         """
         Download resume file with retry logic
-        
-        Args:
-            url: Resume URL
-            save_path: Path to save file
-            candidate_info: Candidate information dict
-            
-        Returns:
-            True if successful
+        Returns: (success: bool, final_path: Path or None, ext: str or None)
         """
         import zipfile
         import tempfile
         import time
         from pathlib import Path as PathLib
         
-        # Skip if file already exists
         if save_path.exists():
             file_size_mb = save_path.stat().st_size / (1024 * 1024)
             logger.info(f"Resume already exists for {candidate_info.get('name', 'Unknown')} ({file_size_mb:.2f} MB)")
             self._record_skip(candidate_info)
-            return True
-            
-        # Retry logic
+            return True, save_path, save_path.suffix
+        
         for attempt in range(1, self.max_retries + 1):
             self._set_current_attempt(attempt)
             logger.info(f"Downloading resume for {candidate_info.get('name', 'Unknown')} ({candidate_info.get('candidate_id', 'Unknown')}) - Attempt {attempt}")
-            
-            success = self._download_resume_attempt(url, save_path, candidate_info)
+            success, final_path, ext = self._download_resume_attempt(url, save_path, candidate_info)
             if success:
-                self._record_success_with_candidate(candidate_info, save_path)
-                return True
-                
+                self._record_success_with_candidate(candidate_info, final_path)
+                return True, final_path, ext
             if attempt < self.max_retries:
                 logger.info(f"Retrying in {self.retry_delay} seconds...")
                 time.sleep(self.retry_delay)
-                
         logger.error(f"Failed to download resume for {candidate_info.get('name', 'Unknown')} after {self.max_retries} attempts")
         self._record_failure_with_candidate(candidate_info)
-        return False
-        
-    def _download_resume_attempt(self, url: str, save_path: Path, 
-                               candidate_info: Dict[str, Any]) -> bool:
+        return False, None, None
+
+    def _download_resume_attempt(self, url: str, save_path: Path, candidate_info: Dict[str, Any]):
         """
-        Single download attempt
-        
-        Args:
-            url: Resume URL
-            save_path: Path to save file
-            candidate_info: Candidate information dict
-            
-        Returns:
-            True if successful
+        Returns: (success: bool, final_path: Path or None, ext: str or None)
         """
         import zipfile
         import tempfile
         import shutil
-        
         try:
-            # Download to a temporary location first
             temp_dir = Path(tempfile.mkdtemp())
             temp_file = temp_dir / "temp_download"
-            
-            # Download the file
             if not self._download_file(url, temp_file):
-                return False
-                
-            # Check if downloaded file is a ZIP archive
+                return False, None, None
             if self._is_zip_file(temp_file):
                 logger.info(f"Downloaded file is a ZIP archive, extracting...")
-                
-                # Extract ZIP file to find resume files
-                # First, check what's in the ZIP
                 with zipfile.ZipFile(temp_file, 'r') as zip_ref:
                     file_list = zip_ref.namelist()
-                    
-                    # Look for PDF files first
                     pdf_files = [f for f in file_list if f.lower().endswith('.pdf')]
-                    
-                    # Look for .doc files (old Word format)
                     doc_files = [f for f in file_list if f.lower().endswith('.doc')]
-                    
                     if pdf_files:
-                        # Extract the first PDF file found
                         resume_filename = pdf_files[0]
                         logger.info(f"Found PDF in ZIP: {resume_filename}")
-                        
-                        # Extract to temporary location
                         zip_ref.extract(resume_filename, temp_dir)
                         extracted_file = temp_dir / resume_filename
-                        
-                        # Move to final location (keep .pdf extension)
                         final_save_path = save_path.with_suffix('.pdf')
                         shutil.move(str(extracted_file), str(final_save_path))
-                        
-                        # Cleanup
                         shutil.rmtree(temp_dir)
-                        
-                        # Validate the extracted PDF
                         if validate_pdf_file(final_save_path):
                             file_size_mb = final_save_path.stat().st_size / (1024 * 1024)
                             logger.info(f"✅ Successfully downloaded and extracted PDF ({file_size_mb:.2f} MB)")
                             self._record_success(file_size_mb)
-                            return True
+                            return True, final_save_path, '.pdf'
                         else:
                             logger.error("Extracted file is not a valid PDF")
                             final_save_path.unlink(missing_ok=True)
-                            return False
-                    
-                    # If no PDF, check for .doc files (old Word format)
+                            return False, None, None
                     elif doc_files:
                         is_old_word_doc = True
                         old_doc_filename = doc_files[0]
-                    # If no PDF or .doc, check for .docx documents
                     elif 'word/document.xml' in file_list:
                         is_word_doc = True
                     else:
                         is_word_doc = False
                         is_old_word_doc = False
-                
-                # Handle old Word documents (.doc files)
                 if 'is_old_word_doc' in locals() and is_old_word_doc:
                     logger.info(f"Found old Word document (.doc) in ZIP: {old_doc_filename}")
-                    
-                    # Extract the .doc file
                     with zipfile.ZipFile(temp_file, 'r') as zip_ref:
                         zip_ref.extract(old_doc_filename, temp_dir)
                         extracted_file = temp_dir / old_doc_filename
-                        
-                        # Move to final location (keep .doc extension)
                         final_save_path = save_path.with_suffix('.doc')
                         shutil.move(str(extracted_file), str(final_save_path))
-                    
-                    # Cleanup
                     shutil.rmtree(temp_dir)
-                    
-                    # Check if it's a valid file
                     if final_save_path.exists() and final_save_path.stat().st_size > 0:
                         file_size_mb = final_save_path.stat().st_size / (1024 * 1024)
                         logger.info(f"✅ Successfully downloaded old Word document (.doc) ({file_size_mb:.2f} MB)")
                         self._record_success(file_size_mb)
-                        return True
+                        return True, final_save_path, '.doc'
                     else:
                         logger.error("Failed to save old Word document")
                         final_save_path.unlink(missing_ok=True)
-                        return False
-                        
-                # Handle new Word documents (.docx files)
+                        return False, None, None
                 elif 'is_word_doc' in locals() and is_word_doc:
                     logger.info("Found Word document in ZIP, extracting as .docx file")
-                    
-                    # Save the entire ZIP as a .docx file (Word documents are ZIP archives)
                     final_save_path = save_path.with_suffix('.docx')
                     shutil.move(str(temp_file), str(final_save_path))
-                    
-                    # Cleanup
                     shutil.rmtree(temp_dir)
-                    
-                    # Check if it's a valid file
                     if final_save_path.exists() and final_save_path.stat().st_size > 0:
                         file_size_mb = final_save_path.stat().st_size / (1024 * 1024)
                         logger.info(f"✅ Successfully downloaded Word document ({file_size_mb:.2f} MB)")
                         self._record_success(file_size_mb)
-                        return True
+                        return True, final_save_path, '.docx'
                     else:
                         logger.error("Failed to save Word document")
                         final_save_path.unlink(missing_ok=True)
-                        return False
+                        return False, None, None
                 else:
                     logger.error("No PDF or Word documents found in ZIP archive")
                     logger.debug(f"ZIP contents: {file_list}")
-                    return False
+                    return False, None, None
             else:
-                # Not a ZIP file, treat as regular file
                 shutil.move(str(temp_file), str(save_path))
-                
-                # Cleanup temp directory
                 shutil.rmtree(temp_dir)
-                
-                # Validate file
                 if validate_pdf_file(save_path):
                     file_size_mb = save_path.stat().st_size / (1024 * 1024)
                     logger.info(f"✅ Successfully downloaded PDF ({file_size_mb:.2f} MB)")
                     self._record_success(file_size_mb)
-                    return True
+                    return True, save_path, '.pdf'
                 else:
                     logger.error(f"Downloaded file is not a valid PDF for {candidate_info.get('name', 'Unknown')}")
                     save_path.unlink(missing_ok=True)
-                    return False
-                
+                    return False, None, None
         except Exception as e:
             logger.error(f"Error downloading resume: {e}")
             save_path.unlink(missing_ok=True)
-            
-            # Cleanup temp directory if it exists
             try:
                 if 'temp_dir' in locals():
                     shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
-                
-            return False
-            
+            return False, None, None
+        
     def _is_zip_file(self, file_path: Path) -> bool:
         """Check if file is a ZIP archive"""
         try:

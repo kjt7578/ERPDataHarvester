@@ -1346,11 +1346,14 @@ class ERPScraper:
                                         candidate_detailed_info.append(candidate_info)
                                         logger.info(f"✅ Completed full processing for candidate {candidate_info.candidate_id} ({candidate_info.name})")
                                         
-                                        # Save HTML for debugging
-                                        debug_html_path = Path(f"./debug_candidate_{actual_candidate_id}.html")
-                                        with open(debug_html_path, "w", encoding="utf-8") as f:
-                                            f.write(candidate_html)
-                                        logger.debug(f"🔍 DEBUG: Saved candidate HTML to {debug_html_path}")
+                                        # Save HTML for debugging (only if debug mode is enabled)
+                                        if self.debug_mode:
+                                            debug_html_path = Path(f"./debug_candidate_{actual_candidate_id}.html")
+                                            with open(debug_html_path, "w", encoding="utf-8") as f:
+                                                f.write(candidate_html)
+                                            logger.debug(f"🔍 DEBUG: Saved candidate HTML to {debug_html_path}")
+                                        else:
+                                            logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping candidate HTML save for {actual_candidate_id}")
                                         
                                     else:
                                         logger.warning(f"❌ Failed to process candidate {actual_candidate_id} using complete logic")
@@ -1359,42 +1362,44 @@ class ERPScraper:
                                     # Fallback to basic parsing if main processor not available
                                     logger.warning(f"⚠️ Main processor not available, using basic parsing for candidate {actual_candidate_id}")
                                     
-                                    candidate_info = self.parse_candidate_detail(
-                                        candidate_html, 
-                                        candidate_url_id, 
-                                        raw_html=candidate_html,
-                                        detail_url=candidate_url
-                                    )
+                                candidate_info = self.parse_candidate_detail(
+                                    candidate_html, 
+                                    candidate_url_id, 
+                                raw_html=candidate_html,
+                                detail_url=candidate_url
+                            )
+                                
+                                if candidate_info:
+                                    candidate_detailed_info.append(candidate_info)
                                     
-                                    if candidate_info:
-                                        candidate_detailed_info.append(candidate_info)
-                                        
                                         # Save individual candidate metadata (basic)
-                                        if self.metadata_saver:
-                                            self.metadata_saver.save_candidate_metadata(candidate_info.to_dict())
+                                    if self.metadata_saver:
+                                        self.metadata_saver.save_candidate_metadata(candidate_info.to_dict())
                                             logger.info(f"💾 Saved basic metadata for candidate {candidate_info.candidate_id}")
-                                        
-                                        # Download resume if URL is available
-                                        if candidate_info.resume_url and self.downloader:
-                                            try:
-                                                from file_utils import generate_resume_filename
-                                                from config import config
-                                                resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
-                                                resume_path = Path(config.resumes_dir) / resume_filename
-                                                
-                                                success = self.downloader.download_resume(
-                                                    candidate_info.resume_url, 
-                                                    resume_path, 
-                                                    candidate_info.to_dict()
-                                                )
-                                                if success:
-                                                    logger.info(f"📄 Downloaded resume for candidate {candidate_info.candidate_id}: {resume_path}")
-                                                else:
-                                                    logger.warning(f"❌ Failed to download resume for candidate {candidate_info.candidate_id}")
-                                            except Exception as e:
-                                                logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
-                                    else:
-                                        logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
+                                    
+                                    # Download resume if URL is available
+                                    if candidate_info.resume_url and self.downloader:
+                                        try:
+                                            from file_utils import generate_resume_filename
+                                            from config import config
+                                            resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
+                                            resume_path = Path(config.resumes_dir) / resume_filename
+                                            
+                                            success, final_path, ext = self.downloader.download_resume(
+                                                candidate_info.resume_url, 
+                                                resume_path, 
+                                                candidate_info.to_dict()
+                                            )
+                                            if success:
+                                                logger.info(f"📄 Downloaded resume for candidate {candidate_info.candidate_id}: {final_path}")
+                                                if self.metadata_saver:
+                                                    self.metadata_saver.save_candidate_metadata(candidate_info.to_dict(), pdf_path=final_path)
+                                            else:
+                                                logger.warning(f"❌ Failed to download resume for candidate {candidate_info.candidate_id}")
+                                        except Exception as e:
+                                            logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
+                                else:
+                                    logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
                                     
                             except Exception as e:
                                 logger.error(f"❌ Error processing candidate details for {actual_candidate_id}: {e}")
