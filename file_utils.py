@@ -699,3 +699,73 @@ def parse_case_id_range(id_range: str, id_type: str = 'url') -> List[int]:
         ids = [predict_url_case_id(real_id) for real_id in ids]
     
     return ids 
+
+
+def get_case_id_range(case_id: int) -> str:
+    """
+    Get case ID range in 100-unit format
+    
+    Args:
+        case_id: Case ID (e.g., 13940)
+        
+    Returns:
+        Range string (e.g., "13900-13999")
+    """
+    # Calculate the start of the 100-unit range
+    start = (case_id // 100) * 100
+    end = start + 99
+    return f"{start}-{end}"
+
+
+def get_client_id_range(client_id: int) -> str:
+    """
+    Get client ID range in 100-unit format
+    
+    Args:
+        client_id: Client ID (e.g., 1150)
+        
+    Returns:
+        Range string (e.g., "1100-1199")
+    """
+    # Calculate the start of the 100-unit range
+    start = (client_id // 100) * 100
+    end = start + 99
+    return f"{start}-{end}"
+
+
+def create_case_directory_structure(base_path: Path, case_id: int) -> Path:
+    """
+    Create directory structure for case storage
+    
+    Args:
+        base_path: Base directory path (e.g., case/)
+        case_id: Case ID (e.g., 13940)
+        
+    Returns:
+        Full path to the created directory
+    """
+    range_str = get_case_id_range(case_id)
+    full_path = base_path / range_str
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created case directory structure: {full_path}")
+    return full_path
+
+
+def create_client_directory_structure(base_path: Path, client_id: int) -> Path:
+    """
+    Create directory structure for client storage
+    
+    Args:
+        base_path: Base directory path (e.g., client/)
+        client_id: Client ID (e.g., 1150)
+        
+    Returns:
+        Full path to the created directory
+    """
+    range_str = get_client_id_range(client_id)
+    full_path = base_path / range_str
+    full_path.mkdir(parents=True, exist_ok=True)
+    
+    logger.debug(f"Created client directory structure: {full_path}")
+    return full_path 

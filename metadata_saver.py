@@ -16,7 +16,8 @@ from file_utils import (
     generate_case_filename, 
     generate_metadata_filename,
     extract_date_parts,
-    create_directory_structure
+    create_directory_structure,
+    create_case_directory_structure
 )
 
 logger = logging.getLogger(__name__)
@@ -32,19 +33,27 @@ class MetadataSaver:
         Args:
             metadata_dir: Directory for metadata files
             results_dir: Directory for consolidated results
+            config_obj: Configuration object
         """
+        self.config = config_obj
         self.metadata_dir = Path(metadata_dir)
         self.results_dir = Path(results_dir)
-        self.case_dir = self.metadata_dir.parent / 'case'  # Harvested/case
+        
+        # Use new folder structure from config
+        self.case_dir = self.config.case_dir
+        self.jd_dir = self.config.jd_dir
+        self.client_dir = self.config.client_dir
         
         # Create metadata subdirectories
-        self.metadata_case_dir = self.metadata_dir / "case"
-        self.metadata_resume_dir = self.metadata_dir / "resume"
+        self.metadata_case_dir = self.config.metadata_case_dir
+        self.metadata_resume_dir = self.config.metadata_resume_dir
         
         # Create directories
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        (self.metadata_dir.parent / 'case').mkdir(parents=True, exist_ok=True)
+        self.case_dir.mkdir(parents=True, exist_ok=True)
+        self.jd_dir.mkdir(parents=True, exist_ok=True)
+        self.client_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_case_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_resume_dir.mkdir(parents=True, exist_ok=True)
         
@@ -198,10 +207,13 @@ class MetadataSaver:
             job_title = case_info.get('job_title', 'unknown')
             company_name = case_info.get('company_name', 'unknown')
             
+            # Create case metadata directory structure based on case ID range
+            case_metadata_dir_path = create_case_directory_structure(self.metadata_case_dir, int(case_id))
+            
             # Use new bracket-based naming: [Case-ID] Company - Position.meta.json
             case_filename = generate_case_filename(company_name, job_title, case_id, 'json')
             metadata_filename = generate_metadata_filename(case_filename, 'meta')
-            metadata_path = self.metadata_case_dir / metadata_filename
+            metadata_path = case_metadata_dir_path / metadata_filename
             
             # Prepare metadata
             metadata = {
@@ -251,9 +263,12 @@ class MetadataSaver:
             job_title = case_info.get('job_title', 'unknown')
             company_name = case_info.get('company_name', 'unknown')
             
+            # Create case directory structure based on case ID range
+            case_dir_path = create_case_directory_structure(self.case_dir, int(case_id))
+            
             # Use new bracket-based naming: [Case-ID] Company - Position.json
             filename = generate_case_filename(company_name, job_title, case_id, 'json')
-            case_path = self.case_dir / filename
+            case_path = case_dir_path / filename
             
             # Prepare complete JD data
             jd_data = {
@@ -597,21 +612,23 @@ class MetadataSaver:
     def generate_download_report(self, download_stats: Dict[str, Any]) -> Path:
         """
         Generate a comprehensive download and processing report
-        
-        Args:
-            download_stats: Download statistics from PDFDownloader
-            
-        Returns:
-            Path to report file
         """
         report_path = self.results_dir / f'processing_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
-        
         try:
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write("ERP Resume Processing Report\n")
                 f.write("=" * 60 + "\n\n")
                 f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                
+
+                # 데이터가 비어 있을 때 안내 메시지
+                if not download_stats or (not self.processing_errors and not self.warnings and not download_stats.get('successful_candidates') and not download_stats.get('failed_candidates')):
+                    f.write("⚠️ No processing data available.\n")
+                    f.write("- No candidates/cases were processed.\n")
+                    f.write("- No errors or warnings were recorded.\n")
+                    f.write("- Please check if the harvesting process ran successfully.\n")
+                    logger.warning("Processing report generated but no data to report.")
+                    return report_path
+
                 # Command Information Section
                 f.write("📋 Command Information:\n")
                 f.write("-" * 30 + "\n")
@@ -785,12 +802,22 @@ class MetadataSaver:
                         else:
                             f.write("• Retry failed downloads with increased timeout\n")
                             f.write("• Check file format compatibility\n")
-                        
+                
             logger.info(f"Generated comprehensive processing report: {report_path}")
             return report_path
             
         except Exception as e:
             logger.error(f"Error generating report: {e}")
+            # 예외 발생 시에도 최소 안내 메시지 기록
+            try:
+                with open(report_path, 'w', encoding='utf-8') as f:
+                    f.write("ERP Resume Processing Report\n")
+                    f.write("=" * 60 + "\n\n")
+                    f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                    f.write(f"❌ Error occurred while generating report: {e}\n")
+                    f.write("- Please check the log for details.\n")
+            except Exception as e2:
+                logger.error(f"Failed to write minimal error report: {e2}")
             return None
             
     def _sanitize_name(self, name: str) -> str:

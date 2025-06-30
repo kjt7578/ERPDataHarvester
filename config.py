@@ -31,11 +31,20 @@ class Config:
         self.login_url = '/mem/dispLogin'
         
         # Paths Configuration
-        self.base_dir = Path(os.getenv('BASE_DIR', './Harvested'))
+        self.base_dir = Path(os.getenv('BASE_DIR', './Content'))
         self.resumes_dir = self.base_dir / 'Resume'
         self.metadata_dir = self.base_dir / 'metadata'
         self.results_dir = self.base_dir / 'results'
         self.logs_dir = self.base_dir / 'logs'
+        
+        # New folder structure
+        self.jd_dir = self.base_dir / 'JD'
+        self.case_dir = self.base_dir / 'case'
+        self.client_dir = self.base_dir / 'client'
+        
+        # Metadata subdirectories
+        self.metadata_case_dir = self.metadata_dir / 'case'
+        self.metadata_resume_dir = self.metadata_dir / 'resume'
         
         # Scraping Configuration
         self.page_load_timeout = self._get_int_env('PAGE_LOAD_TIMEOUT', 30)
@@ -135,7 +144,13 @@ class Config:
             self.resumes_dir,
             self.metadata_dir,
             self.results_dir,
-            self.logs_dir
+            self.logs_dir,
+            # New directories
+            self.jd_dir,
+            self.case_dir,
+            self.client_dir,
+            self.metadata_case_dir,
+            self.metadata_resume_dir
         ]
         
         for directory in directories:

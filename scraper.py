@@ -1372,10 +1372,10 @@ class ERPScraper:
                                 if candidate_info:
                                     candidate_detailed_info.append(candidate_info)
                                     
-                                        # Save individual candidate metadata (basic)
+                                    # Save individual candidate metadata (basic)
                                     if self.metadata_saver:
                                         self.metadata_saver.save_candidate_metadata(candidate_info.to_dict())
-                                            logger.info(f"💾 Saved basic metadata for candidate {candidate_info.candidate_id}")
+                                        logger.info(f"💾 Saved basic metadata for candidate {candidate_info.candidate_id}")
                                     
                                     # Download resume if URL is available
                                     if candidate_info.resume_url and self.downloader:

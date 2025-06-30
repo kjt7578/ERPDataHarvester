@@ -25,6 +25,7 @@ case/
 resumes/
 metadata/
 results/
+Content/
 logs/
 *.pdf
 *.log
