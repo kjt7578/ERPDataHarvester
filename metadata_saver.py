@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import pandas as pd
 
-from config import config
+
 from file_utils import (
     sanitize_filename, 
     generate_resume_filename,
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class MetadataSaver:
     """Handles saving candidate metadata in various formats"""
     
-    def __init__(self, metadata_dir: Path, results_dir: Path):
+    def __init__(self, metadata_dir: Path, results_dir: Path, config_obj: Any):
         """
         Initialize metadata saver
         

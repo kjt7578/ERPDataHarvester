@@ -27,24 +27,30 @@ ERP 웹 시스템에서 후보자 정보와 케이스 정보를 자동으로 수
 ### ✨ Case + Candidate 통합 수집 기능 (NEW!) 
 - **상태**: ✅ 완료! (2025-01-27)
 - **기능**: Case 정보 추출과 동시에 연결된 candidate의 metadata와 resume도 함께 다운로드
+- **테스트 결과**: 
+  - ✅ Case 정보 추출 정상 작동
+  - ✅ 연결된 candidate 없는 경우 적절히 처리
+  - ✅ 명확한 로그 메시지 출력
+  - ✅ 오류 없이 Case 파일 생성
 - **사용법**: 
   ```bash
   # Case 정보만 (기존 방식)
-  python main.py --type case --id 3897
+  python main.py --type case --id 3999
   
   # Case + 연결된 Candidate 정보까지 (새로운 방식)
-  python main.py --type case --id 3897 --with-candidates
-  python main.py --type case --range "3897-3890" --with-candidates
-  python main.py --type case --real-id 13897 --with-candidates
-  python main.py --type case --real-range "13897-13890" --with-candidates
+  python main.py --type case --id 3999 --with-candidates
+  python main.py --type case --range "3999-3990" --with-candidates
+  python main.py --type case --real-id 13999 --with-candidates
+  python main.py --type case --real-range "13999-13990" --with-candidates
   ```
 - **구현 내용**:
   - CLI에 `--with-candidates` 플래그 추가
   - Case 타입에서만 사용 가능하도록 검증
   - Case 정보 추출 시 연결된 candidate 페이지도 자동 방문
   - Candidate 상세 정보 파싱 및 metadata 저장
-  - Resume 파일 자동 다운로드
+  - Resume 파일 자동 다운로드 (PDFDownloader 통합)
   - 한 번의 명령어로 완전한 데이터 수집 가능
+  - 연결된 candidate가 없는 경우 안전하게 처리
 - **성능**: 이미 candidate 페이지를 방문하므로 추가 네트워크 비용 최소화
 
 ## 📅 향후 작업 (Future Tasks)
@@ -537,3 +543,47 @@ python main.py --type case --id 3897 --id-type auto ✅
 - **검증**: 7개 Case 샘플 100% 일치 (CJ Foodville, 삼성전자 MX, Semes 등)
 - **하위 호환성**: 기존 URL ID 방식 완전 지원
 - **로깅**: 실시간 ID 매핑 및 변환 과정 표시
+
+## 🚨 주요 에러 (Major Errors)
+
+### ✅ Case Candidate 추출 문제 해결 완료 ✅ SOLVED (2025-06-30)
+- **문제**: "No candidates connected to this case" 로그가 출력되어 candidate 추출이 작동하지 않는 것으로 보임
+- **원인 분석**: 
+  1. 실제로는 정상 작동하고 있었으나 일부 case에는 연결된 candidate가 없었음
+  2. 디버깅 정보 부족으로 정확한 상황 파악이 어려웠음
+- **해결 방법**:
+  1. **디버깅 코드 대폭 강화**: session 검증, HTML 저장, 단계별 상세 로깅 추가
+  2. **대안 패턴 추가**: openCandidate 외에도 href="/candidate/", data-candidate-id, 텍스트 패턴 검색 지원
+  3. **실시간 검증**: Case 3897 (Real ID: 13897)에서 2명 candidate 성공 추출 확인
+- **테스트 결과**:
+  ```
+  ✅ Found candidate URL ID: 64853 from onclick: openCandidate(64853)
+  ✅ Found candidate URL ID: 64879 from onclick: openCandidate(64879)
+  ✅ Found actual Candidate ID: 1044027 (from URL ID: 64853)
+  ✅ Found actual Candidate ID: 1044053 (from URL ID: 64879)
+  Total connected candidates: 2
+  ```
+
+### ✅ --with-candidates 통합 수집 기능 완전 구현 ✅ SOLVED (2025-06-30)
+- **문제**: Case 다운로드시 연결된 candidate resume까지 함께 수집하는 기능 완성도 확인 필요
+- **해결된 이슈들**:
+  1. **Downloader 초기화 순서 문제**: main.py에서 scraper 초기화시 downloader가 None이었음
+     - **수정**: downloader를 먼저 초기화한 후 scraper에 전달하도록 순서 변경
+  2. **Config Import 문제**: scraper.py에서 `import config` 대신 `from config import config` 사용
+     - **에러**: "module 'config' has no attribute 'resumes_dir'"
+     - **수정**: 올바른 import 방식으로 변경
+- **최종 테스트 결과** (Case 3897):
+  ```
+  🎯 Case + Candidate Mode: Will also download connected candidate resumes and metadata
+  ✅ Found actual Candidate ID: 1044027 (from URL ID: 64853)
+  📄 Downloaded resume for candidate 1044027: [Resume-1044027] JESSICA SEO.pdf (1.30 MB)
+  ✅ Found actual Candidate ID: 1044053 (from URL ID: 64879) 
+  📄 Downloaded resume for candidate 1044053: [Resume-1044053] Yujin Oh.pdf (0.17 MB)
+  🎯 Total connected candidates: 2 (processed 2 with full details)
+  ```
+- **기능 완성도**: ✅ 100% 작동
+  - Case metadata 수집 ✅
+  - 연결된 candidate 발견 ✅
+  - Candidate 상세 정보 추출 ✅
+  - Resume 파일 다운로드 ✅
+  - 통합 저장 ✅

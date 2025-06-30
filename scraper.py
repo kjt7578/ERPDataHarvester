@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, asdict
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,12 @@ class CandidateInfo:
     position: Optional[str] = None
     detail_url: Optional[str] = None
     url_id: Optional[str] = None  # URL ID for reference (e.g., 65586)
+    
+    # Additional qualification fields
+    experience: Optional[str] = None  # Years of experience
+    work_eligibility: Optional[str] = None  # Work visa status
+    education: Optional[str] = None  # Education level
+    location: Optional[str] = None  # Current location
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -58,6 +65,9 @@ class JobCaseInfo:
     drafter: Optional[str] = None  # Sean Kim
     client_id: Optional[str] = None  # 245
     candidate_ids: Optional[List[str]] = None  # Connected candidate IDs
+    
+    # Connected candidates detailed info (when with_candidates=True)
+    _connected_candidates_details: Optional[List[Dict[str, Any]]] = None
     
     # Contract Information
     contract_type: Optional[str] = None  # Contingency
@@ -117,14 +127,20 @@ class JobCaseInfo:
 class ERPScraper:
     """Scraper for extracting data from ERP pages"""
     
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, metadata_saver: Any = None, downloader: Any = None, debug_mode: bool = False):
         """
         Initialize scraper
         
         Args:
             base_url: Base URL of ERP system
+            metadata_saver: Instance of MetadataSaver
+            downloader: Instance of PDFDownloader
+            debug_mode: Save debug HTML files for troubleshooting
         """
         self.base_url = base_url.rstrip('/')
+        self.metadata_saver = metadata_saver
+        self.downloader = downloader
+        self.debug_mode = debug_mode
         
     def parse_candidate_list(self, html: str) -> List[Dict[str, str]]:
         """
@@ -674,6 +690,7 @@ class ERPScraper:
         Returns:
             Resume URL or None
         """
+        logger.debug("Attempting to find resume URL...")
         try:
             # Method 1: Find downloadFile button with file key from onclick
             # <button type="button" onclick="downloadFile('f26632f3-5419-b4d4-654c-13b51e32f228');">Download</button>
@@ -681,6 +698,7 @@ class ERPScraper:
             for button in download_buttons:
                 onclick = button.get('onclick')
                 if onclick and 'downloadFile' in onclick:
+                    logger.debug(f"Found button with onclick: {onclick}")
                     # Extract file key from downloadFile('f26632f3-5419-b4d4-654c-13b51e32f228')
                     key_match = re.search(r"downloadFile\('([^']+)'\)", onclick)
                     if key_match:
@@ -693,6 +711,7 @@ class ERPScraper:
             pdf_links = soup.find_all('a', href=True)
             for link in pdf_links:
                 href = link['href']
+                logger.debug(f"Found link href: {href}")
                 if '.pdf' in href.lower() and 'files' in href:
                     # Extract file key from direct PDF URL
                     # http://erp.hrcap.com/html/files/f/2/f26632f3-5419-b4d4-654c-13b51e32f228.pdf
@@ -713,6 +732,7 @@ class ERPScraper:
                 onclick = element.get('onclick')
                 button_text = element.get_text(strip=True).upper()
                 if onclick and 'downloadFile' in onclick and 'RESUME' in button_text:
+                    logger.debug(f"Found RESUME button with onclick: {onclick}")
                     key_match = re.search(r"downloadFile\('([^']+)'\)", onclick)
                     if key_match:
                         file_key = key_match.group(1)
@@ -1161,21 +1181,86 @@ class ERPScraper:
         candidate_ids = []
         candidate_detailed_info = []  # Store detailed candidate info if with_candidates is True
         
+        # DEBUG: Check session availability
+        session_available = hasattr(self, 'session') and self.session
+        logger.info(f"🔍 DEBUG: Session available: {session_available}")
+        if hasattr(self, 'session'):
+            logger.info(f"🔍 DEBUG: self.session exists: {self.session is not None}")
+        else:
+            logger.warning("🔍 DEBUG: self.session attribute does not exist")
+        
         try:
+            # Save HTML for debugging (only if debug mode is enabled)
+            if self.debug_mode:
+                debug_html_path = Path(f"./debug_case_{jobcase_id}.html")
+                with open(debug_html_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                logger.info(f"🔍 DEBUG: Saved case HTML to {debug_html_path}")
+            else:
+                logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping HTML save for case {jobcase_id}")
+            
             # Find all elements with openCandidate onclick to get URL IDs
-            onclick_elements = soup.find_all(attrs={'onclick': re.compile(r'openCandidate\(\d+\)')})
+            # Find all elements with onclick attributes
+            all_onclick_elements = soup.find_all(attrs={'onclick': True})
+            logger.info(f"🔍 DEBUG: Found {len(all_onclick_elements)} elements with onclick attributes")
+            
             candidate_url_ids = []
-            for element in onclick_elements:
+            for i, element in enumerate(all_onclick_elements):
                 onclick = element.get('onclick')
                 if onclick:
+                    logger.debug(f"🔍 DEBUG: Element {i+1} onclick: {onclick}")
                     id_match = re.search(r'openCandidate\((\d+)\)', onclick)
                     if id_match:
                         url_candidate_id = id_match.group(1)
                         candidate_url_ids.append(url_candidate_id)
-                        logger.info(f"Found candidate URL ID: {url_candidate_id}")
+                        logger.info(f"✅ Found candidate URL ID: {url_candidate_id} from onclick: {onclick}")
+                    else:
+                        # Check for other candidate-related patterns
+                        if 'candidate' in onclick.lower():
+                            logger.info(f"🔍 DEBUG: Found candidate-related onclick (no openCandidate): {onclick}")
+            
+            # Try alternative patterns if openCandidate not found
+            if not candidate_url_ids:
+                logger.warning("🔍 DEBUG: No openCandidate patterns found, trying alternative methods...")
+                
+                # Method 1: Look for href patterns with /candidate/
+                candidate_links = soup.find_all('a', href=re.compile(r'/candidate/'))
+                logger.info(f"🔍 DEBUG: Found {len(candidate_links)} links with /candidate/ pattern")
+                for link in candidate_links:
+                    href = link.get('href')
+                    candidate_id_match = re.search(r'/candidate/(?:dispView/)?(\d+)', href)
+                    if candidate_id_match:
+                        candidate_id = candidate_id_match.group(1)
+                        candidate_url_ids.append(candidate_id)
+                        logger.info(f"✅ Found candidate URL ID from href: {candidate_id} ({href})")
+                
+                # Method 2: Look for data-candidate-id attributes
+                candidate_data_elements = soup.find_all(attrs={'data-candidate-id': True})
+                logger.info(f"🔍 DEBUG: Found {len(candidate_data_elements)} elements with data-candidate-id")
+                for element in candidate_data_elements:
+                    candidate_id = element.get('data-candidate-id')
+                    if candidate_id:
+                        candidate_url_ids.append(candidate_id)
+                        logger.info(f"✅ Found candidate URL ID from data attribute: {candidate_id}")
+                
+                # Method 3: Search all text for candidate ID patterns
+                page_text = soup.get_text()
+                candidate_patterns = [
+                    r'candidate[:\s]*(\d{5,7})',  # "candidate: 65586" or "candidate 65586"
+                    r'후보자[:\s]*(\d{5,7})',     # Korean equivalent
+                    r'ID[:\s]*(\d{5,7})',        # "ID: 65586"
+                ]
+                for pattern in candidate_patterns:
+                    matches = re.findall(pattern, page_text, re.IGNORECASE)
+                    for match in matches:
+                        if match not in candidate_url_ids:
+                            candidate_url_ids.append(match)
+                            logger.info(f"✅ Found candidate URL ID from text pattern: {match}")
+            
+            logger.info(f"🔍 DEBUG: Total candidate URL IDs found: {len(candidate_url_ids)} - {candidate_url_ids}")
             
             # Visit each candidate page to get actual Candidate ID and optionally detailed info
-            if hasattr(self, 'session') and self.session:
+            if session_available:
                 for i, candidate_url_id in enumerate(candidate_url_ids, 1):
                     try:
                         candidate_url = f"{self.base_url}/candidate/dispView/{candidate_url_id}"
@@ -1183,10 +1268,20 @@ class ERPScraper:
                         if with_candidates:
                             logger.info(f"🎯 Processing candidate {i}/{len(candidate_url_ids)}: URL ID {candidate_url_id} (with full details)")
                         else:
-                            logger.info(f"Fetching candidate details from: {candidate_url}")
+                            logger.info(f"🔍 DEBUG: Fetching candidate details from: {candidate_url}")
                         
                         response = self.session.get(candidate_url)
                         candidate_html = response.text if hasattr(response, 'text') else str(response)
+                        
+                        # DEBUG: Save candidate HTML for analysis (only if debug mode is enabled)
+                        if self.debug_mode:
+                            debug_candidate_path = Path(f"./debug_candidate_{candidate_url_id}.html")
+                            with open(debug_candidate_path, "w", encoding="utf-8") as f:
+                                f.write(candidate_html)
+                            logger.debug(f"🔍 DEBUG: Saved candidate HTML to {debug_candidate_path}")
+                        else:
+                            logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping candidate HTML save for {candidate_url_id}")
+                        
                         candidate_soup = BeautifulSoup(candidate_html, 'html.parser')
                         
                         # Extract actual Candidate ID
@@ -1197,62 +1292,109 @@ class ERPScraper:
                             if candidate_id_td:
                                 actual_candidate_id = candidate_id_td.get_text(strip=True)
                                 candidate_ids.append(actual_candidate_id)
-                                logger.info(f"Found actual Candidate ID: {actual_candidate_id} (from URL ID: {candidate_url_id})")
+                                logger.info(f"✅ Found actual Candidate ID: {actual_candidate_id} (from URL ID: {candidate_url_id})")
                             else:
                                 # Fallback to URL ID if actual ID not found
                                 candidate_ids.append(candidate_url_id)
-                                logger.warning(f"Candidate ID td not found, using URL ID: {candidate_url_id}")
+                                logger.warning(f"⚠️ Candidate ID td not found, using URL ID: {candidate_url_id}")
                                 actual_candidate_id = candidate_url_id
                         else:
                             # Fallback to URL ID if actual ID not found  
                             candidate_ids.append(candidate_url_id)
-                            logger.warning(f"Candidate ID th not found, using URL ID: {candidate_url_id}")
+                            logger.warning(f"⚠️ Candidate ID th not found, using URL ID: {candidate_url_id}")
                             actual_candidate_id = candidate_url_id
                         
-                        # If with_candidates is True, extract full candidate details and download resume
+                        # If with_candidates is True, use complete candidate processing logic
                         if with_candidates and actual_candidate_id:
                             try:
-                                logger.info(f"📋 Extracting detailed information for candidate {actual_candidate_id}")
+                                logger.info(f"📋 Processing full candidate details for {actual_candidate_id}")
                                 
-                                # Parse candidate detail from already fetched HTML
-                                candidate_info = self.parse_candidate_detail(
-                                    candidate_html, 
-                                    candidate_url_id, 
-                                    raw_html=candidate_html,
-                                    detail_url=candidate_url
-                                )
-                                
-                                if candidate_info:
-                                    # Store candidate detailed info
-                                    candidate_detailed_info.append(candidate_info)
+                                # Use the complete candidate processing logic (same as individual candidate harvest)
+                                # This includes full parsing, metadata extraction, and resume download
+                                if hasattr(self, '_main_processor') and self._main_processor:
+                                    # Create candidate_basic dict for processing
+                                    candidate_basic = {
+                                        'candidate_id': candidate_url_id,  # Use URL ID for ERP access
+                                        'detail_url': candidate_url,
+                                        'name': 'Unknown'  # Will be extracted during processing
+                                    }
                                     
-                                    # Import necessary modules for file operations
-                                    from metadata_saver import MetadataSaver
-                                    from downloader import ResumeDownloader
-                                    from file_utils import ensure_directory_exists
-                                    import config
+                                    # Use main processor's complete candidate processing logic
+                                    candidate_dict = self._main_processor._process_candidate(candidate_basic)
                                     
-                                    # Save individual candidate metadata
-                                    metadata_saver = MetadataSaver()
-                                    metadata_saver.save_candidate_metadata(candidate_info.to_dict())
-                                    logger.info(f"💾 Saved metadata for candidate {candidate_info.candidate_id}")
-                                    
-                                    # Download resume if URL is available
-                                    if candidate_info.resume_url:
-                                        try:
-                                            downloader = ResumeDownloader(self.session)
-                                            resume_path = downloader.download_resume(candidate_info)
-                                            if resume_path:
-                                                logger.info(f"📄 Downloaded resume for candidate {candidate_info.candidate_id}: {resume_path}")
-                                            else:
-                                                logger.warning(f"❌ Failed to download resume for candidate {candidate_info.candidate_id}")
-                                        except Exception as e:
-                                            logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
+                                    if candidate_dict:
+                                        # Convert dict back to CandidateInfo for consistency
+                                        candidate_info = CandidateInfo(
+                                            candidate_id=candidate_dict.get('candidate_id', actual_candidate_id),
+                                            name=candidate_dict.get('name', 'Unknown'),
+                                            created_date=candidate_dict.get('created_date', ''),
+                                            updated_date=candidate_dict.get('updated_date', ''),
+                                            resume_url=candidate_dict.get('resume_url'),
+                                            email=candidate_dict.get('email'),
+                                            phone=candidate_dict.get('phone'),
+                                            status=candidate_dict.get('status'),
+                                            position=candidate_dict.get('position'),
+                                            detail_url=candidate_dict.get('detail_url', candidate_url),
+                                            url_id=candidate_dict.get('url_id', candidate_url_id),
+                                            # Include additional qualification fields
+                                            experience=candidate_dict.get('experience'),
+                                            work_eligibility=candidate_dict.get('work_eligibility'),
+                                            education=candidate_dict.get('education'),
+                                            location=candidate_dict.get('location')
+                                        )
+                                        
+                                        candidate_detailed_info.append(candidate_info)
+                                        logger.info(f"✅ Completed full processing for candidate {candidate_info.candidate_id} ({candidate_info.name})")
+                                        
+                                        # Save HTML for debugging
+                                        debug_html_path = Path(f"./debug_candidate_{actual_candidate_id}.html")
+                                        with open(debug_html_path, "w", encoding="utf-8") as f:
+                                            f.write(candidate_html)
+                                        logger.debug(f"🔍 DEBUG: Saved candidate HTML to {debug_html_path}")
+                                        
                                     else:
-                                        logger.warning(f"⚠️ No resume URL found for candidate {candidate_info.candidate_id}")
+                                        logger.warning(f"❌ Failed to process candidate {actual_candidate_id} using complete logic")
                                         
                                 else:
-                                    logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
+                                    # Fallback to basic parsing if main processor not available
+                                    logger.warning(f"⚠️ Main processor not available, using basic parsing for candidate {actual_candidate_id}")
+                                    
+                                    candidate_info = self.parse_candidate_detail(
+                                        candidate_html, 
+                                        candidate_url_id, 
+                                        raw_html=candidate_html,
+                                        detail_url=candidate_url
+                                    )
+                                    
+                                    if candidate_info:
+                                        candidate_detailed_info.append(candidate_info)
+                                        
+                                        # Save individual candidate metadata (basic)
+                                        if self.metadata_saver:
+                                            self.metadata_saver.save_candidate_metadata(candidate_info.to_dict())
+                                            logger.info(f"💾 Saved basic metadata for candidate {candidate_info.candidate_id}")
+                                        
+                                        # Download resume if URL is available
+                                        if candidate_info.resume_url and self.downloader:
+                                            try:
+                                                from file_utils import generate_resume_filename
+                                                from config import config
+                                                resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
+                                                resume_path = Path(config.resumes_dir) / resume_filename
+                                                
+                                                success = self.downloader.download_resume(
+                                                    candidate_info.resume_url, 
+                                                    resume_path, 
+                                                    candidate_info.to_dict()
+                                                )
+                                                if success:
+                                                    logger.info(f"📄 Downloaded resume for candidate {candidate_info.candidate_id}: {resume_path}")
+                                                else:
+                                                    logger.warning(f"❌ Failed to download resume for candidate {candidate_info.candidate_id}")
+                                            except Exception as e:
+                                                logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
+                                    else:
+                                        logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
                                     
                             except Exception as e:
                                 logger.error(f"❌ Error processing candidate details for {actual_candidate_id}: {e}")
@@ -1271,7 +1413,7 @@ class ERPScraper:
             info['candidate_ids'] = candidate_ids
             
             if with_candidates:
-                if candidate_ids:
+                if candidate_detailed_info:
                     logger.info(f"🎯 Total connected candidates: {len(candidate_ids)} (processed {len(candidate_detailed_info)} with full details)")
                 else:
                     logger.info("🎯 No candidates connected to this case - only case information will be saved")
@@ -1546,19 +1688,18 @@ class ERPScraper:
             logger.warning(f"Error extracting detailed JD information: {e}")
         
         # Set URL ID for reference
-        info['url_id'] = jobcase_id  # Store original URL ID for reference
+        info['url_id'] = url_id  # Store URL ID for reference
         
-        # For JobCaseInfo compatibility, set required fields
-        if 'company_name' not in info:
-            info['company_name'] = 'Unknown'
-        if 'assigned_team' not in info:
-            info['assigned_team'] = None
-        if 'drafter' not in info:
-            info['drafter'] = None
-        if 'client_id' not in info:
-            info['client_id'] = None
-            
-        return JobCaseInfo(**info)
+        # Separate connected candidates details from main info
+        connected_details = info.pop('_connected_candidates_details', [])
+        
+        # Create JobCaseInfo object
+        job_case_info = JobCaseInfo(**info)
+        
+        # Add connected candidates details separately
+        job_case_info._connected_candidates_details = connected_details
+        
+        return job_case_info
 
     def extract_pagination_info(self, html: str) -> Dict[str, Any]:
         """

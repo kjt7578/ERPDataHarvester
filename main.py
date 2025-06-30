@@ -66,14 +66,16 @@ def setup_logging(log_level: str = 'INFO'):
 class ERPResumeHarvester:
     """Main orchestrator for resume harvesting process"""
     
-    def __init__(self, use_selenium: bool = False):
+    def __init__(self, use_selenium: bool = False, debug_mode: bool = False):
         """
         Initialize harvester
         
         Args:
             use_selenium: Use Selenium instead of requests
+            debug_mode: Save debug HTML files for troubleshooting
         """
         self.use_selenium = use_selenium
+        self.debug_mode = debug_mode
         self.session: Optional[ERPSession] = None
         self.scraper: Optional[ERPScraper] = None
         self.downloader: Optional[PDFDownloader] = None
@@ -114,18 +116,23 @@ class ERPResumeHarvester:
                 
             logging.info("Successfully logged in")
             
-            # Initialize other components
-            self.scraper = ERPScraper(config.erp_base_url)
-            self.scraper.session = self.session  # Pass session for additional page fetching
+            # Initialize downloader first
             self.downloader = PDFDownloader(
                 session=self.session,
                 max_retries=config.max_retries,
                 retry_delay=config.retry_delay,
                 timeout=config.download_timeout
             )
+            
+            # Initialize other components
+            self.scraper = ERPScraper(config.erp_base_url, metadata_saver=self.metadata_saver, downloader=self.downloader, debug_mode=self.debug_mode)
+            self.scraper.session = self.session  # Pass session for additional page fetching
+            # Pass main processor reference so scraper can use complete candidate processing
+            self.scraper._main_processor = self
             self.metadata_saver = MetadataSaver(
                 metadata_dir=config.metadata_dir,
-                results_dir=config.results_dir
+                results_dir=config.results_dir,
+                config_obj=config
             )
             
             return True
@@ -883,6 +890,11 @@ def main():
         action='store_true',
         help='[CASE ONLY] Also download connected candidate resumes and metadata'
     )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Save debug HTML files for troubleshooting (default: False)'
+    )
     
     args = parser.parse_args()
     
@@ -946,7 +958,7 @@ def main():
         print("🎯 Case + Candidate Mode: Will also download connected candidate resumes and metadata")
     
     # Create harvester and run appropriate method
-    harvester = ERPResumeHarvester(use_selenium=True)
+    harvester = ERPResumeHarvester(use_selenium=True, debug_mode=args.debug)
     
     if args.type == 'case':
         success = harvester.harvest_cases(
