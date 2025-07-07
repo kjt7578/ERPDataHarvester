@@ -1199,68 +1199,75 @@ class ERPScraper:
             else:
                 logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping HTML save for case {jobcase_id}")
             
-            # Find all elements with openCandidate onclick to get URL IDs
-            all_onclick_elements = soup.find_all(attrs={'onclick': True})
-            logger.info(f"🔍 DEBUG: Found {len(all_onclick_elements)} elements with onclick attributes")
+            # 1. Selenium 사용 시: <div id='candidatelist'>가 비어 있지 않을 때까지 대기
+            candidate_list_html = None
+            if hasattr(self, 'session') and hasattr(self.session, 'driver'):
+                try:
+                    from selenium.webdriver.common.by import By
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    driver = self.session.driver
+                    # <div id='candidatelist'>가 로딩될 때까지 최대 10초 대기
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.ID, "candidatelist"))
+                    )
+                    WebDriverWait(driver, 10).until(
+                        lambda d: d.find_element(By.ID, "candidatelist").get_attribute('innerHTML').strip() != ""
+                    )
+                    candidate_list_html = driver.find_element(By.ID, "candidatelist").get_attribute('innerHTML')
+                    logger.info(f"✅ Selenium: candidatelist div loaded, length={len(candidate_list_html)}")
+                except Exception as e:
+                    logger.error(f"❌ Selenium candidatelist div 로딩 실패: {e}")
             
-            candidate_url_ids = []
-            for i, element in enumerate(all_onclick_elements):
-                onclick = element.get('onclick')
-                logger.info(f"onclick raw: {onclick}")  # 실제 값 확인
-                if onclick and isinstance(onclick, str):
-                    id_match = re.search(r'openCandidate\s*\(\s*(\d+)\s*\)', onclick)
-                    if id_match:
-                        url_candidate_id = id_match.group(1)
-                        candidate_url_ids.append(url_candidate_id)
-                        logger.info(f"✅ Found candidate URL ID: {url_candidate_id} from onclick: {onclick}")
-                else:
-                    logger.warning(f"onclick is None or not str: {onclick}")
+            # 2. requests 기반: AJAX로 직접 후보자 리스트 요청
+            if not candidate_list_html and hasattr(self, 'session') and hasattr(self.session, 'post'):
+                try:
+                    casekey = jobcase_id
+                    # 실제로는 real case id가 필요할 수 있음
+                    url = f"{self.base_url}/case/procGetCandidateList/{casekey}"
+                    response = self.session.post(url)
+                    if hasattr(response, 'text'):
+                        candidate_list_html = response.text
+                        logger.info(f"✅ AJAX: /case/procGetCandidateList/{casekey} 응답 길이={len(candidate_list_html)}")
+                except Exception as e:
+                    logger.error(f"❌ AJAX 후보자 리스트 요청 실패: {e}")
             
-            # Try alternative patterns if openCandidate not found
-            if not candidate_url_ids:
-                logger.warning("🔍 DEBUG: No openCandidate patterns found, trying alternative methods...")
-                
-                # Method 1: Look for href patterns with /candidate/
-                candidate_links = soup.find_all('a', href=re.compile(r'/candidate/'))
-                logger.info(f"🔍 DEBUG: Found {len(candidate_links)} links with /candidate/ pattern")
-                for link in candidate_links:
-                    href = link.get('href')
-                    candidate_id_match = re.search(r'/candidate/(?:dispView/)?(\d+)', href)
-                    if candidate_id_match:
-                        candidate_id = candidate_id_match.group(1)
-                        candidate_url_ids.append(candidate_id)
-                        logger.info(f"✅ Found candidate URL ID from href: {candidate_id} ({href})")
-                
-                # Method 2: Look for data-candidate-id attributes
-                candidate_data_elements = soup.find_all(attrs={'data-candidate-id': True})
-                logger.info(f"🔍 DEBUG: Found {len(candidate_data_elements)} elements with data-candidate-id")
-                for element in candidate_data_elements:
-                    candidate_id = element.get('data-candidate-id')
-                    if candidate_id:
-                        candidate_url_ids.append(candidate_id)
-                        logger.info(f"✅ Found candidate URL ID from data attribute: {candidate_id}")
-                
-                # Method 3: Search all text for candidate ID patterns
-                page_text = soup.get_text()
-                candidate_patterns = [
-                    r'candidate[:\s]*(\d{5,7})',  # "candidate: 65586" or "candidate 65586"
-                    r'후보자[:\s]*(\d{5,7})',     # Korean equivalent
-                    r'ID[:\s]*(\d{5,7})',        # "ID: 65586"
-                ]
-                for pattern in candidate_patterns:
-                    matches = re.findall(pattern, page_text, re.IGNORECASE)
-                    for match in matches:
-                        if match not in candidate_url_ids:
-                            candidate_url_ids.append(match)
-                            logger.info(f"✅ Found candidate URL ID from text pattern: {match}")
-            
-            logger.info(f"🔍 DEBUG: Total candidate URL IDs found: {len(candidate_url_ids)} - {candidate_url_ids}")
+            # 3. 후보자 리스트 파싱
+            if candidate_list_html:
+                candidate_soup = BeautifulSoup(candidate_list_html, 'html.parser')
+                # 기존 onclick 파싱 로직을 candidate_soup에서 반복 적용
+                all_onclick_elements = candidate_soup.find_all(attrs={'onclick': True})
+                logger.info(f"🔍 DEBUG: (AJAX) Found {len(all_onclick_elements)} elements with onclick attributes in candidatelist")
+                candidate_url_ids = []
+                for i, element in enumerate(all_onclick_elements):
+                    onclick = element.get('onclick')
+                    logger.info(f"onclick raw: {onclick}")
+                    if onclick and isinstance(onclick, str):
+                        id_match = re.search(r'openCandidate\s*\(\s*(\d+)\s*\)', onclick)
+                        if id_match:
+                            url_candidate_id = id_match.group(1)
+                            candidate_url_ids.append(url_candidate_id)
+                            logger.info(f"✅ Found candidate URL ID: {url_candidate_id} from onclick: {onclick}")
+                        else:
+                            logger.warning(f"❌ openCandidate 패턴에서 숫자 추출 실패: {onclick}")
+                    else:
+                        logger.warning(f"onclick is None or not str: {onclick}")
+                if not candidate_url_ids:
+                    logger.error("❌ (AJAX) 후보자 URL ID를 하나도 찾지 못함! candidatelist 구조/패턴 변경 가능성. 전체 HTML 일부를 로그로 남김.")
+                    logger.error(f"candidatelist HTML preview: {candidate_list_html[:1000]}")
+                # 이후 기존 후보자 상세 진입/파싱 로직을 candidate_url_ids에 대해 반복 적용
+                # ... (기존 상세 진입/파싱/저장 코드) ...
+                # candidate_ids, candidate_detailed_info 등도 이 리스트로 채움
+                # (아래 기존 코드와 통합)
+            else:
+                logger.error("❌ candidatelist(후보자 리스트) HTML을 가져오지 못함! 동적 로딩/AJAX 문제.")
             
             # Visit each candidate page to get actual Candidate ID and optionally detailed info
             if session_available:
                 for i, candidate_url_id in enumerate(candidate_url_ids, 1):
                     try:
                         candidate_url = f"{self.base_url}/candidate/dispView/{candidate_url_id}"
+                        logger.info(f"🔗 후보자 상세 진입: {candidate_url}")
                         
                         if with_candidates:
                             logger.info(f"🎯 Processing candidate {i}/{len(candidate_url_ids)}: URL ID {candidate_url_id} (with full details)")
@@ -1291,12 +1298,10 @@ class ERPScraper:
                                 candidate_ids.append(actual_candidate_id)
                                 logger.info(f"✅ Found actual Candidate ID: {actual_candidate_id} (from URL ID: {candidate_url_id})")
                             else:
-                                # Fallback to URL ID if actual ID not found
                                 candidate_ids.append(candidate_url_id)
                                 logger.warning(f"⚠️ Candidate ID td not found, using URL ID: {candidate_url_id}")
                                 actual_candidate_id = candidate_url_id
                         else:
-                            # Fallback to URL ID if actual ID not found  
                             candidate_ids.append(candidate_url_id)
                             logger.warning(f"⚠️ Candidate ID th not found, using URL ID: {candidate_url_id}")
                             actual_candidate_id = candidate_url_id
@@ -1305,22 +1310,14 @@ class ERPScraper:
                         if with_candidates and actual_candidate_id:
                             try:
                                 logger.info(f"📋 Processing full candidate details for {actual_candidate_id}")
-                                
-                                # Use the complete candidate processing logic (same as individual candidate harvest)
-                                # This includes full parsing, metadata extraction, and resume download
                                 if hasattr(self, '_main_processor') and self._main_processor:
-                                    # Create candidate_basic dict for processing
                                     candidate_basic = {
-                                        'candidate_id': candidate_url_id,  # Use URL ID for ERP access
+                                        'candidate_id': candidate_url_id,
                                         'detail_url': candidate_url,
-                                        'name': 'Unknown'  # Will be extracted during processing
+                                        'name': 'Unknown'
                                     }
-                                    
-                                    # Use main processor's complete candidate processing logic
                                     candidate_dict = self._main_processor._process_candidate(candidate_basic)
-                                    
                                     if candidate_dict:
-                                        # Convert dict back to CandidateInfo for consistency
                                         candidate_info = CandidateInfo(
                                             candidate_id=candidate_dict.get('candidate_id', actual_candidate_id),
                                             name=candidate_dict.get('name', 'Unknown'),
@@ -1333,60 +1330,36 @@ class ERPScraper:
                                             position=candidate_dict.get('position'),
                                             detail_url=candidate_dict.get('detail_url', candidate_url),
                                             url_id=candidate_dict.get('url_id', candidate_url_id),
-                                            # Include additional qualification fields
                                             experience=candidate_dict.get('experience'),
                                             work_eligibility=candidate_dict.get('work_eligibility'),
                                             education=candidate_dict.get('education'),
                                             location=candidate_dict.get('location')
                                         )
-                                        
                                         candidate_detailed_info.append(candidate_info)
                                         logger.info(f"✅ Completed full processing for candidate {candidate_info.candidate_id} ({candidate_info.name})")
-                                        
-                                        # Save HTML for debugging (only if debug mode is enabled)
-                                        if self.debug_mode:
-                                            debug_html_path = Path(f"./debug_candidate_{actual_candidate_id}.html")
-                                            with open(debug_html_path, "w", encoding="utf-8") as f:
-                                                f.write(candidate_html)
-                                            logger.debug(f"🔍 DEBUG: Saved candidate HTML to {debug_html_path}")
-                                        else:
-                                            logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping candidate HTML save for {actual_candidate_id}")
-                                        
                                     else:
-                                        logger.warning(f"❌ Failed to process candidate {actual_candidate_id} using complete logic")
-                                        
+                                        logger.error(f"❌ _process_candidate가 None 반환! 입력값: {candidate_basic}, HTML 일부: {candidate_html[:500]}")
                                 else:
-                                    # Fallback to basic parsing if main processor not available
                                     logger.warning(f"⚠️ Main processor not available, using basic parsing for candidate {actual_candidate_id}")
-                                    
                                 candidate_info = self.parse_candidate_detail(
                                     candidate_html, 
                                     candidate_url_id, 
-                                raw_html=candidate_html,
-                                detail_url=candidate_url
-                            )
-                                
+                                    raw_html=candidate_html,
+                                    detail_url=candidate_url
+                                )
                                 if candidate_info:
                                     candidate_detailed_info.append(candidate_info)
-                                    
-                                    # Save individual candidate metadata (basic)
                                     if self.metadata_saver:
                                         self.metadata_saver.save_candidate_metadata(candidate_info.to_dict())
                                         logger.info(f"💾 Saved basic metadata for candidate {candidate_info.candidate_id}")
-                                    
-                                    # Download resume if URL is available
                                     if candidate_info.resume_url and self.downloader:
                                         try:
                                             from file_utils import generate_resume_filename, create_candidate_directory_structure_enhanced, get_optimal_folder_unit, create_hierarchical_directory_structure_enhanced
                                             from config import config
                                             resume_filename = generate_resume_filename(candidate_info.name, candidate_info.candidate_id, 'pdf')
-                                            
-                                            # Create directory based on candidate ID using hierarchical or flat structure
                                             try:
                                                 candidate_id_num = int(candidate_info.candidate_id)
-                                                
                                                 if config.use_hierarchical_structure:
-                                                    # Use hierarchical directory structure
                                                     resume_dir = create_hierarchical_directory_structure_enhanced(
                                                         config.resumes_dir, 
                                                         candidate_id_num, 
@@ -1394,25 +1367,21 @@ class ERPScraper:
                                                     )
                                                     logger.debug(f"Using hierarchical structure (levels: {config.hierarchical_levels}) for candidate ID: {candidate_id_num}")
                                                 else:
-                                                    # Use flat directory structure with auto-detection
                                                     if config.auto_folder_unit:
                                                         unit = get_optimal_folder_unit(candidate_id_num)
                                                         logger.debug(f"Auto-selected folder unit: {unit} for candidate ID: {candidate_id_num}")
                                                     else:
                                                         unit = config.folder_unit
                                                         logger.debug(f"Using configured folder unit: {unit} for candidate ID: {candidate_id_num}")
-                                                    
                                                     resume_dir = create_candidate_directory_structure_enhanced(
                                                         config.resumes_dir, 
                                                         candidate_id_num, 
                                                         unit
                                                     )
-                                            except:
-                                                # Fallback to direct path for backward compatibility
+                                            except Exception as e:
+                                                logger.error(f"❌ 이력서 폴더 생성 실패: {e}")
                                                 resume_dir = config.resumes_dir
-                                            
                                             resume_path = resume_dir / resume_filename
-                                            
                                             success, final_path, ext = self.downloader.download_resume(
                                                 candidate_info.resume_url, 
                                                 resume_path, 
@@ -1428,35 +1397,31 @@ class ERPScraper:
                                             logger.error(f"❌ Resume download error for candidate {candidate_info.candidate_id}: {e}")
                                 else:
                                     logger.warning(f"❌ Failed to parse candidate details for {actual_candidate_id}")
-                                    
                             except Exception as e:
                                 logger.error(f"❌ Error processing candidate details for {actual_candidate_id}: {e}")
-                            
                         time.sleep(1)  # Brief delay between requests
-                        
                     except Exception as e:
                         logger.error(f"Failed to fetch candidate {candidate_url_id}: {e}")
-                        # Fallback to URL ID if page fetch fails
                         candidate_ids.append(candidate_url_id)
             else:
-                # Fallback to URL IDs if session not available
                 candidate_ids = candidate_url_ids
                 logger.warning("Session not available, using URL IDs for candidates")
-                        
+            
+            if not candidate_ids:
+                logger.error("❌ 최종적으로 candidate_ids가 비어 있음! 파싱/저장 로직 점검 필요.")
             info['candidate_ids'] = candidate_ids
             
             if with_candidates:
                 if candidate_detailed_info:
                     logger.info(f"🎯 Total connected candidates: {len(candidate_ids)} (processed {len(candidate_detailed_info)} with full details)")
                 else:
-                    logger.info("🎯 No candidates connected to this case - only case information will be saved")
-                # Store detailed candidate info in the JobCaseInfo for reference
+                    logger.error("🎯 with_candidates인데 candidate_detailed_info가 비어 있음! 파싱/저장/진입 로직 점검 필요.")
                 info['_connected_candidates_details'] = [c.to_dict() for c in candidate_detailed_info]
             else:
                 if candidate_ids:
                     logger.info(f"Total connected candidates: {len(candidate_ids)}")
                 else:
-                    logger.info("No candidates connected to this case")
+                    logger.warning("No candidates connected to this case")
                 
         except Exception as e:
             logger.debug(f"Failed to extract candidate IDs: {e}")
