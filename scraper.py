@@ -1200,24 +1200,21 @@ class ERPScraper:
                 logger.debug(f"🔍 DEBUG: Debug mode disabled, skipping HTML save for case {jobcase_id}")
             
             # Find all elements with openCandidate onclick to get URL IDs
-            # Find all elements with onclick attributes
             all_onclick_elements = soup.find_all(attrs={'onclick': True})
             logger.info(f"🔍 DEBUG: Found {len(all_onclick_elements)} elements with onclick attributes")
             
             candidate_url_ids = []
             for i, element in enumerate(all_onclick_elements):
                 onclick = element.get('onclick')
-                if onclick:
-                    logger.debug(f"🔍 DEBUG: Element {i+1} onclick: {onclick}")
-                    id_match = re.search(r'openCandidate\((\d+)\)', onclick)
+                logger.info(f"onclick raw: {onclick}")  # 실제 값 확인
+                if onclick and isinstance(onclick, str):
+                    id_match = re.search(r'openCandidate\s*\(\s*(\d+)\s*\)', onclick)
                     if id_match:
                         url_candidate_id = id_match.group(1)
                         candidate_url_ids.append(url_candidate_id)
                         logger.info(f"✅ Found candidate URL ID: {url_candidate_id} from onclick: {onclick}")
-                    else:
-                        # Check for other candidate-related patterns
-                        if 'candidate' in onclick.lower():
-                            logger.info(f"🔍 DEBUG: Found candidate-related onclick (no openCandidate): {onclick}")
+                else:
+                    logger.warning(f"onclick is None or not str: {onclick}")
             
             # Try alternative patterns if openCandidate not found
             if not candidate_url_ids:
@@ -1586,7 +1583,9 @@ class ERPScraper:
             position_fields = {
                 'job_category': 'Job Category',
                 'position_level': 'Position Level',
-                'responsibilities': 'Responsibilities', 
+                'employment_type': 'Employment Type',  # 추가
+                'salary_range': 'Salary Range ($)',    # 추가
+                'responsibilities': 'Responsibilities',
                 'responsibilities_input_tag': 'Responsibilities Input Tag',
                 'responsibilities_file_attach': 'Responsibilities File Attach',
                 'job_location': 'Job Location',
@@ -1597,6 +1596,9 @@ class ERPScraper:
             for field_key, field_label in position_fields.items():
                 try:
                     th = soup.find('th', string=field_label)
+                    # Salary Range는 다양한 표기 커버
+                    if not th and field_key == 'salary_range':
+                        th = soup.find('th', string=re.compile('Salary Range', re.I))
                     if th:
                         td = th.find_next_sibling('td')
                         if td:

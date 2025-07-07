@@ -137,8 +137,8 @@ python main.py --type case --range "3897-3890" --analyze-case-pattern
 ### ✨ Case + Candidate 통합 수집 (NEW!)
 ```bash
 # Case 정보와 연결된 모든 candidate 정보도 함께 수집
-python main.py --type case --id 3997 --with-candidates
-python main.py --type case --range "3990-3999" --with-candidates
+python main.py --type case --id 3919 --with-candidates
+python main.py --type case --range "3919-3920" --with-candidates
 python main.py --type case --real-id 13897 --with-candidates
 python main.py --type case --real-range "13897-13890" --with-candidates
 
